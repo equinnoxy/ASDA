@@ -1,0 +1,10 @@
+# Dependencies
+server/node_modules/
+client/node_modules/
+
+# Output files
+.ip_to_send
+logs/
+
+# Credentials
+.env
