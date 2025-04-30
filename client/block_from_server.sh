@@ -1,19 +1,26 @@
 #!/bin/bash
 
 # -------------------------------------
-# Dummy Script: block_from_server.sh
-# -------------------------------------
 # Argumen: IP address yang ingin diblokir
 # Digunakan oleh client.js untuk eksekusi lokal
-# Nanti akan dihubungkan ke fail2ban/iptables
 # -------------------------------------
 
 IP="$1"
+BAN_DURATION=120
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 if [ -z "$IP" ]; then
-  echo "[❌] Tidak ada IP yang diberikan."
+  echo "[❌] IP kosong."
   exit 1
 fi
 
-echo "[✅] Simulasi pemblokiran IP: $IP" >> ./logs/actions.log
-echo "[INFO] IP $IP berhasil diproses oleh block_from_server.sh"
+# Blokir IP pakai Fail2Ban
+sudo fail2ban-client set sshd banip "$IP"
+
+# Logging CSV
+echo "$TIMESTAMP,$IP,BLOCK" >> ./logs/block_log.csv
+echo "[✅] IP $IP diblokir via Fail2Ban" >> ./logs/actions.log
+
+# Jadwalkan unban via 'at'
+UNBAN_CMD="bash $(pwd)/unblock_from_server.sh $IP"
+echo "$UNBAN_CMD" | at now + $((BAN_DURATION / 60)) minutes
