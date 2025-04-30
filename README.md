@@ -9,8 +9,8 @@ ASDA adalah sistem terdistribusi untuk mendeteksi, memblokir, dan menyebarkan in
 server/ 
 ├── server.js 
 ├── .env 
-├── config/ 
 ├── logs/
+│ └── server_log.csv
 
 client/ 
 ├── client.js 
@@ -20,7 +20,6 @@ client/
 ├── fail2ban-trigger.sh 
 ├── .ip_queue 
 ├── logs/ 
-│ ├── actions.log 
 │ └── block_log.csv
 ```
 
@@ -49,13 +48,17 @@ client/
 
 ## 📌 Log & Visualisasi
 
-- Semua pemblokiran dan unban tercatat di `logs/block_log.csv` dalam format:
+- Semua pemblokiran dan unban pada client tercatat di `logs/block_log.csv` dalam format:
 ```
 timestamp,ip,action 
 2025-04-29 20:31:11,192.168.1.101,BLOCK 
 2025-04-29 20:33:11,192.168.1.101,UNBLOCK
 ```
-
+- Sedangkan untuk server tercatat di `logs/server_log.csv` dalam format:
+```
+timestamp,source_id,forwarded_to,total_clients,message
+2025-04-29T18:30:22.153Z,client-01,2,3,BLOCK_IP:192.168.100.123"
+```
 - File ini dapat digunakan untuk visualisasi serangan atau analisis keamanan.
 
 ---
@@ -90,7 +93,33 @@ node client.js
 -   Jika menggunakan `sudo`, pastikan permission script benar atau dijalankan dari user yang diizinkan.
 -   Pastikan semua client aktif saat server melakukan broadcast.
 ---
+## 📡 Format Pesan WebSocket
 
+Semua komunikasi antara client dan server menggunakan **format JSON** agar seragam, mudah dikelola, dan fleksibel untuk pengembangan lanjutan.
+
+### 🔐 1. Registrasi Client (saat koneksi terbuka)
+
+```json
+{
+  "type": "REGISTER",
+  "client_id": "client-01"
+}
+```
+-   Harus dikirim oleh client segera setelah terkoneksi ke server
+-   Server menyimpan `client_id` agar bisa mencatat log dengan nama client
+### 🚨 2. Permintaan Pemblokiran IP (dikirim dari client pelapor)
+
+```json
+{
+  "type": "BLOCK_IP",
+  "client_id": "client-01",
+  "ip": "192.168.100.123"
+}
+```
+-   Menandakan bahwa client `client-01` mendeteksi IP penyerang
+-   Server akan menyebarkan data ini ke seluruh client lain (kecuali pengirim)
+-   Semua client yang menerima akan memblokir IP tersebut secara otomatis
+---
 ## 🚀 Status
 - Dalam tahap pengembangan awal.
 ---
