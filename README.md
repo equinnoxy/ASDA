@@ -9,8 +9,8 @@ ASDA adalah sistem terdistribusi untuk mendeteksi, memblokir, dan menyebarkan in
 server/ 
 ├── server.js 
 ├── .env 
+├── config/ 
 ├── logs/
-│ └── server_log.csv
 
 client/ 
 ├── client.js 
@@ -20,6 +20,7 @@ client/
 ├── fail2ban-trigger.sh 
 ├── .ip_queue 
 ├── logs/ 
+│ ├── actions.log 
 │ └── block_log.csv
 ```
 
@@ -95,30 +96,56 @@ node client.js
 ---
 ## 📡 Format Pesan WebSocket
 
-Semua komunikasi antara client dan server menggunakan **format JSON** agar seragam, mudah dikelola, dan fleksibel untuk pengembangan lanjutan.
+Semua komunikasi antara client dan server menggunakan **format JSON** agar seragam, mudah dikelola, dan aman untuk parsing serta logging.
 
 ### 🔐 1. Registrasi Client (saat koneksi terbuka)
 
 ```json
 {
   "type": "REGISTER",
-  "client_id": "client-01"
+  "client_id": "client-01",
+  "token": "ASDA_SECRET_2025"
 }
 ```
--   Harus dikirim oleh client segera setelah terkoneksi ke server
--   Server menyimpan `client_id` agar bisa mencatat log dengan nama client
+-   Dikirim sekali saat client terkoneksi ke server.
+-   Wajib berisi `client_id` dan `token`.
 ### 🚨 2. Permintaan Pemblokiran IP (dikirim dari client pelapor)
 
 ```json
 {
   "type": "BLOCK_IP",
   "client_id": "client-01",
-  "ip": "192.168.100.123"
+  "ip": "192.168.100.123",
+  "token": "ASDA_SECRET_2025"
 }
 ```
--   Menandakan bahwa client `client-01` mendeteksi IP penyerang
--   Server akan menyebarkan data ini ke seluruh client lain (kecuali pengirim)
--   Semua client yang menerima akan memblokir IP tersebut secara otomatis
+-   Dikirim oleh client pelapor ke server.
+-   Server akan memvalidasi, lalu menyebarkannya ke semua client lain.
+-   Client penerima akan memanggil `block_from_server.sh <IP>`.
+---
+## 🛡️ Sistem Autentikasi
+-   Semua pesan harus menyertakan **token rahasia** (`token`) yang diset di `.env`.
+-   Server memverifikasi token sebelum memproses pesan.
+-   Pesan yang tidak memiliki token valid **akan diabaikan secara otomatis**.
+
+📁 Contoh `.env` di Server
+```env
+PORT=3000
+SECRET_TOKEN=ASDA_SECRET_2025
+```
+📁 Contoh `.env` di Client
+```env
+SERVER_IP=127.0.0.1
+SERVER_PORT=3000
+CLIENT_ID=client-01
+SECRET_TOKEN=ASDA_SECRET_2025
+```
+
+Pesan hanya akan diproses jika:
+-   Format JSON valid
+-   `type`, `client_id`, dan `token` tersedia
+-   `ip` valid (untuk `BLOCK_IP`)
+-   Token cocok dengan token milik server (`process.env.SECRET_TOKEN`)
 ---
 ## 🚀 Status
 - Dalam tahap pengembangan awal.
