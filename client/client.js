@@ -5,6 +5,8 @@ const fs = require('fs');
 
 const serverIp = process.env.SERVER_IP;
 const serverPort = process.env.SERVER_PORT;
+const clientId = process.env.CLIENT_ID;
+const token = process.env.SECRET_TOKEN;
 const url = `ws://${serverIp}:${serverPort}`;
 const path = '.ip_queue';
 
@@ -15,7 +17,8 @@ ws.on('open', () => {
 
     ws.send(JSON.stringify({
         type: 'REGISTER',
-        client_id: 'client-01' // Ganti dengan ID unik untuk setiap client
+        client_id: clientId,
+        token: token // Ganti dengan ID unik untuk setiap client
     }));
 });
 
@@ -32,6 +35,8 @@ ws.on('message', (message) => {
                 }
                 console.log(stdout);
             });
+        } else {
+            console.warn(`[⚠️] Pesan diterima tapi tidak diproses:`, data);
         }
     } catch (e) {
         console.error(`[❌] Gagal parsing pesan:`, e.message);
@@ -50,7 +55,12 @@ setInterval(() => {
 
         ipList.forEach(ip => {
             console.log(`📤 Mengirim IP dari antrean: ${ip}`);
-            ws.send(`BLOCK_IP:${ip}`);
+            ws.send(JSON.stringify({
+                type: 'BLOCK_IP',
+                client_id: clientId,
+                token: token,
+                ip: ip
+            }));
         });
 
         fs.unlinkSync(path); // hapus antrean setelah dikirim semua
