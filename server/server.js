@@ -7,6 +7,7 @@ const port = process.env.PORT || 3000;
 const logPath = path.join(__dirname, 'logs', 'server_log.csv');
 
 const wss = new WebSocket.Server({ port });
+const clientMap = new Map(); // ws => client_id
 console.log(`🔌 ASDA WebSocket Server running on port ${port}`);
 
 // Tulis header kalau file belum ada
@@ -23,18 +24,37 @@ wss.on('connection', (ws, req) => {
         const totalClients = wss.clients.size;
         let forwardedCount = 0;
 
-        // Kirim ke semua client kecuali pengirim
-        wss.clients.forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message.toString());
-                forwardedCount++;
+        try {
+            const data = JSON.parse(message);
+            const clientId = data.client_id || clientMap.get(ws) || 'unknown';
+
+            // Register client ID
+            if (data.type === 'REGISTER' && data.client_id) {
+                clientMap.set(ws, data.client_id);
+                console.log(`🆔 Client registered: ${data.client_id}`);
+                return;
             }
-        });
 
-        const logLine = `${timestamp},${clientIp},${forwardedCount},${totalClients},"${message.toString()}"\n`;
-        fs.appendFileSync(logPath, logLine);
+            // Pemblokiran IP
+            if (data.type === 'BLOCK_IP' && data.ip) {
+                const payload = JSON.stringify(data);
 
-        console.log(`📩 Message from ${clientIp} forwarded to ${forwardedCount}/${totalClients} clients`);
+                wss.clients.forEach(client => {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send(payload);
+                        forwardedCount++;
+                    }
+                });
+
+                // Logging
+                const logLine = `${timestamp},${clientId},${forwardedCount},${totalClients},${data.type}:${data.ip}\n`;
+                fs.appendFileSync(logPath, logLine);
+
+                console.log(`📩 BLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients}`);
+            }
+        } catch (e) {
+            console.error(`[❌] Gagal parse JSON dari client:`, e.message);
+        }
     });
 
     ws.on('close', () => {

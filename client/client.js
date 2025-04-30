@@ -12,24 +12,29 @@ const ws = new WebSocket(url);
 
 ws.on('open', () => {
     console.log(`✅ Connected to ASDA WebSocket Server at ${url}`);
+
+    ws.send(JSON.stringify({
+        type: 'REGISTER',
+        client_id: 'client-01' // Ganti dengan ID unik untuk setiap client
+    }));
 });
 
 ws.on('message', (message) => {
-    console.log('📥 Received from server:', message.toString());
-
-    const [action, ip] = message.toString().split(':');
-
-    if (action === 'BLOCK_IP' && ip) {
-        console.log(`🔒 Memproses pemblokiran IP ${ip}...`);
-
-        // Panggil shell script block_from_server.sh
-        exec(`./block_from_server.sh ${ip}`, (err, stdout, stderr) => {
-            if (err) {
-                console.error(`[❌] Gagal eksekusi blokir IP: ${stderr}`);
-                return;
-            }
-            console.log(stdout);
-        });
+    try {
+        const data = JSON.parse(message);
+        if (data.type === 'BLOCK_IP' && data.ip) {
+            const ip = data.ip;
+            console.log(`🔒 Memblokir IP: ${ip}`);
+            exec(`./block_from_server.sh ${ip}`, (err, stdout, stderr) => {
+                if (err) {
+                    console.error(`[❌] Gagal eksekusi blokir IP: ${stderr}`);
+                    return;
+                }
+                console.log(stdout);
+            });
+        }
+    } catch (e) {
+        console.error(`[❌] Gagal parsing pesan:`, e.message);
     }
 });
 
