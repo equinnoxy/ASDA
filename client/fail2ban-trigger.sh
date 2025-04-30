@@ -14,6 +14,6 @@ if [ -z "$IP" ]; then
   exit 1
 fi
 
-# Kirim IP ke client.js (pakai file queue/temp misalnya)
-echo "$IP" > .ip_to_send
-echo "[INFO] IP $IP dikirim ke client.js melalui .ip_to_send"
+# Tambahkan ke file antrian
+echo "$IP" >> .ip_queue
+echo "[INFO] IP $IP dimasukkan ke antrean .ip_queue"

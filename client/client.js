@@ -6,6 +6,7 @@ const fs = require('fs');
 const serverIp = process.env.SERVER_IP;
 const serverPort = process.env.SERVER_PORT;
 const url = `ws://${serverIp}:${serverPort}`;
+const path = '.ip_queue';
 
 const ws = new WebSocket(url);
 
@@ -42,13 +43,15 @@ ws.on('close', () => {
 
 // Fungsi polling file .ip_to_send
 setInterval(() => {
-  if (fs.existsSync('.ip_to_send')) {
-    const ip = fs.readFileSync('.ip_to_send', 'utf8').trim();
-    if (ip) {
-      console.log(`📤 Mengirim IP dari Fail2Ban: ${ip}`);
-      ws.send(`BLOCK_IP:${ip}`);
-    }
-    fs.unlinkSync('.ip_to_send'); // hapus setelah dikirim
-  }
-}, 3000); // tiap 3 detik
+    if (fs.existsSync(path)) {
+        const data = fs.readFileSync(path, 'utf8').trim();
+        const ipList = data.split('\n').filter(ip => ip !== '');
 
+        ipList.forEach(ip => {
+            console.log(`📤 Mengirim IP dari antrean: ${ip}`);
+            ws.send(`BLOCK_IP:${ip}`);
+        });
+
+        fs.unlinkSync(path); // hapus antrean setelah dikirim semua
+    }
+}, 3000); // polling setiap 3 detik
