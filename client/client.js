@@ -11,11 +11,7 @@ const path = '.ip_queue';
 const ws = new WebSocket(url);
 
 ws.on('open', () => {
-    console.log('✅ Connected to ASDA WebSocket Server');
-
-    // Dummy message kirim IP dari client sendiri
-    const dummyIP = '192.168.100.123';
-    ws.send(`BLOCK_IP:${dummyIP}`);
+    console.log(`✅ Connected to ASDA WebSocket Server at ${url}`);
 });
 
 ws.on('message', (message) => {
