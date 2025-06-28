@@ -1064,7 +1064,7 @@ async function start() {
     });
     
     // Start the web server for the dashboard
-    app.listen(webPort, () => {
+    app.listen(webPort, '0.0.0.0', () => {
         console.log(`🌐 ASDA Dashboard running on port ${webPort}`);
     });
 }
