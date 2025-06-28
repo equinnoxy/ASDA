@@ -8,6 +8,7 @@ const mysql = require('mysql2/promise');
 const axios = require('axios');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const MySQLStore = require('express-mysql-session')(session);
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
 
@@ -134,22 +135,80 @@ async function initDatabase() {
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy headers if in production - necessary for secure cookies behind a proxy
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1); // trust first proxy
+}
+
+if (process.env.BEHIND_CLOUDFLARE === 'true') {
+    // Cloudflare sends client IP in CF-Connecting-IP
+    app.set('trust proxy', true);
+    
+    // Log proxy detection
+    console.log('✅ Cloudflare proxy detection enabled');
+}
+
 // Express middleware
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(cookieParser());
 
 // Session middleware
-app.use(session({
+const sessionOptions = {
     secret: process.env.SESSION_SECRET || 'asda-session-secret',
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: process.env.NODE_ENV === 'production',
+        // For Cloudflare proxy, check for X-Forwarded-Proto header
+        secure: process.env.BEHIND_CLOUDFLARE === 'true' ? true : 
+               (process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIE !== 'true'),
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: 'lax'
     }
-}));
+};
+
+// Only configure MySQL session store if we have a DB connection
+if (dbPool) {
+    try {
+        // Use existing connection options from the pool for consistency
+        const dbConfig = {
+            host: process.env.DB_HOST || 'localhost',
+            port: 3306,
+            user: process.env.DB_USER || 'root',
+            password: process.env.DB_PASSWORD || '',
+            database: process.env.DB_NAME || 'asda'
+        };
+        
+        const sessionDBOptions = {
+            ...dbConfig,
+            // The sessions table is created by MySQL itself
+            createDatabaseTable: true,
+            schema: {
+                tableName: 'sessions_store',
+                columnNames: {
+                    session_id: 'session_id',
+                    expires: 'expires',
+                    data: 'data'
+                }
+            },
+            clearExpired: true,
+            checkExpirationInterval: 900000, // How frequently expired sessions will be cleared (in ms) - 15 minutes
+        };
+        
+        // Create MySQL session store
+        const sessionStore = new MySQLStore(sessionDBOptions);
+        sessionOptions.store = sessionStore;
+        console.log('✅ MySQL session store initialized');
+    } catch (err) {
+        console.error('❌ Failed to initialize MySQL session store:', err);
+        console.log('⚠️ Falling back to memory store - NOT RECOMMENDED FOR PRODUCTION');
+    }
+} else {
+    console.log('⚠️ Using memory session store - not recommended for production');
+}
+
+app.use(session(sessionOptions));
 
 // Register API routes with authentication middleware
 app.use('/api', (req, res, next) => {
@@ -674,13 +733,36 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ error: 'Logout failed' });
-        }
-        res.clearCookie('connect.sid');
+    if (req.session) {
+        // Get session cookie settings to match them on clearCookie
+        const cookieOptions = req.session.cookie || {};
+        const cookieSettings = {
+            path: '/',
+            httpOnly: cookieOptions.httpOnly || true,
+            secure: cookieOptions.secure || false,
+            sameSite: cookieOptions.sameSite || 'lax'
+        };
+
+        req.session.destroy((err) => {
+            if (err) {
+                console.error('Error destroying session:', err);
+                return res.status(500).json({ error: 'Logout failed' });
+            }
+            
+            // Clear cookie with matching settings
+            res.clearCookie('connect.sid', cookieSettings);
+            res.json({ success: true });
+        });
+    } else {
+        // Session already gone
+        res.clearCookie('connect.sid', {
+            path: '/',
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIE !== 'true',
+            sameSite: 'lax'
+        });
         res.json({ success: true });
-    });
+    }
 });
 
 app.get('/api/check-auth', (req, res) => {
