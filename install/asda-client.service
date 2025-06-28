@@ -1,0 +1,19 @@
+[Unit]
+Description=ASDA Client
+After=network.target fail2ban.service
+Wants=fail2ban.service
+
+[Service]
+Type=simple
+User=asda
+WorkingDirectory=/opt/asda/client
+ExecStart=/usr/bin/node client.js
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=asda-client
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

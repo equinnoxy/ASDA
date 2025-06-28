@@ -1,0 +1,19 @@
+[Unit]
+Description=ASDA Server
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=asda
+WorkingDirectory=/opt/asda/server
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=asda-server
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
