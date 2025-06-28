@@ -55,6 +55,17 @@ echo "2) Install ASDA Server"
 echo "3) Exit"
 read -p "Choose an option (1-3): " option
 
+# Ask for installation path upfront
+if [ "$option" == "1" ] || [ "$option" == "2" ]; then
+    component_type=$([ "$option" == "1" ] && echo "client" || echo "server")
+    read -p "Enter path to ASDA ${component_type} files: " install_path
+    
+    if [ ! -d "$install_path" ]; then
+        print_status "red" "Directory not found: $install_path"
+        exit 1
+    fi
+fi
+
 case $option in
     1)
         # Install ASDA Client
@@ -68,14 +79,8 @@ case $option in
             useradd -r -s /bin/false asda
         fi
         
-        # Copy files
-        read -p "Enter path to ASDA client files: " client_path
-        if [ ! -d "$client_path" ]; then
-            print_status "red" "Directory not found: $client_path"
-            exit 1
-        fi
-        
-        cp -r "$client_path"/* /opt/asda/client/
+        # Copy files (using the path collected earlier)
+        cp -r "$install_path"/* /opt/asda/client/
         
         # Fix permissions
         chown -R asda:asda /opt/asda/client
@@ -116,11 +121,24 @@ case $option in
         fi
         
         # Configure Fail2Ban integration
-        cp /opt/asda/client/install/asda-notify.conf /etc/fail2ban/action.d/
-        cp /opt/asda/client/install/sshd-asda.conf /etc/fail2ban/jail.d/
-        
+        cp "$(dirname "$0")/asda-notify.conf" /etc/fail2ban/action.d/
+        cp "$(dirname "$0")/sshd-asda.conf" /etc/fail2ban/jail.d/
+
         # Install systemd service
-        cp /opt/asda/client/install/asda-client.service /etc/systemd/system/
+        print_status "blue" "Installing systemd service..."
+        if [ -f "$(dirname "$0")/asda-client.service" ]; then
+            cp "$(dirname "$0")/asda-client.service" /etc/systemd/system/
+        elif [ -f "./asda-client.service" ]; then
+            cp "./asda-client.service" /etc/systemd/system/
+        else
+            read -p "Enter path to asda-client.service file: " service_path
+            if [ -f "$service_path" ]; then
+                cp "$service_path" /etc/systemd/system/
+            else
+                print_status "red" "Service file not found! Please manually copy it to /etc/systemd/system/"
+                exit 1
+            fi
+        fi
         systemctl daemon-reload
         systemctl enable asda-client
         systemctl start asda-client
@@ -144,14 +162,8 @@ case $option in
             useradd -r -s /bin/false asda
         fi
         
-        # Copy files
-        read -p "Enter path to ASDA server files: " server_path
-        if [ ! -d "$server_path" ]; then
-            print_status "red" "Directory not found: $server_path"
-            exit 1
-        fi
-        
-        cp -r "$server_path"/* /opt/asda/server/
+        # Copy files (using the path collected earlier)
+        cp -r "$install_path"/* /opt/asda/server/
         
         # Fix permissions
         chown -R asda:asda /opt/asda/server
@@ -206,7 +218,20 @@ case $option in
         fi
         
         # Install systemd service
-        cp /opt/asda/server/install/asda-server.service /etc/systemd/system/
+        print_status "blue" "Installing systemd service..."
+        if [ -f "$(dirname "$0")/asda-server.service" ]; then
+            cp "$(dirname "$0")/asda-server.service" /etc/systemd/system/
+        elif [ -f "./asda-server.service" ]; then
+            cp "./asda-server.service" /etc/systemd/system/
+        else
+            read -p "Enter path to asda-server.service file: " service_path
+            if [ -f "$service_path" ]; then
+                cp "$service_path" /etc/systemd/system/
+            else
+                print_status "red" "Service file not found! Please manually copy it to /etc/systemd/system/"
+                exit 1
+            fi
+        fi
         systemctl daemon-reload
         systemctl enable asda-server
         systemctl start asda-server

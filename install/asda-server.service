@@ -6,9 +6,10 @@ Wants=mysql.service
 [Service]
 Type=simple
 User=asda
+Group=asda
 WorkingDirectory=/opt/asda/server
-ExecStart=/usr/bin/node server.js
-Restart=on-failure
+ExecStart=/usr/bin/node /opt/asda/server/server.js
+Restart=always
 RestartSec=10
 StandardOutput=syslog
 StandardError=syslog
