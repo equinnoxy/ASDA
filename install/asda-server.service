@@ -15,6 +15,10 @@ StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=asda-server
 Environment=NODE_ENV=production
+# If your server using Cloudflare, uncomment the next line
+# Environment=BEHIND_CLOUDFLARE=true
+# If your server is not directly serving HTTPS, uncomment the next line
+# Environment=DISABLE_SECURE_COOKIE=true
 
 [Install]
 WantedBy=multi-user.target
