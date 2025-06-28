@@ -121,23 +121,46 @@ case $option in
         fi
         
         # Configure Fail2Ban integration
-        cp "$(dirname "$0")/asda-notify.conf" /etc/fail2ban/action.d/
-        cp "$(dirname "$0")/sshd-asda.conf" /etc/fail2ban/jail.d/
+        print_status "blue" "Configuring Fail2Ban integration..."
+
+        # Ask for the installation path with default value
+        read -p "Enter path to ASDA Fail2Ban configuration files [/root/ASDA/install/]: " fail2ban_path
+        fail2ban_path=${fail2ban_path:-"/root/ASDA/install/"}
+
+        # Make sure the path ends with a slash
+        [[ "${fail2ban_path}" != */ ]] && fail2ban_path="${fail2ban_path}/"
+
+        # Check if files exist in the specified path
+        if [ -f "${fail2ban_path}asda-notify.conf" ] && [ -f "${fail2ban_path}sshd-asda.conf" ]; then
+            # Copy Fail2Ban configuration files
+            cp "${fail2ban_path}asda-notify.conf" /etc/fail2ban/action.d/
+            cp "${fail2ban_path}sshd-asda.conf" /etc/fail2ban/jail.d/
+            print_status "green" "Fail2Ban configuration files installed successfully."
+        else
+            print_status "red" "Could not find Fail2Ban configuration files in ${fail2ban_path}"
+            print_status "red" "Make sure asda-notify.conf and sshd-asda.conf exist in the specified directory."
+            print_status "red" "Fail2Ban integration will not work properly."
+        fi
 
         # Install systemd service
         print_status "blue" "Installing systemd service..."
-        if [ -f "$(dirname "$0")/asda-client.service" ]; then
-            cp "$(dirname "$0")/asda-client.service" /etc/systemd/system/
-        elif [ -f "./asda-client.service" ]; then
-            cp "./asda-client.service" /etc/systemd/system/
+
+        # Ask for the installation path with default value
+        read -p "Enter path to ASDA service files [/root/ASDA/install/]: " service_path
+        service_path=${service_path:-"/root/ASDA/install/"}
+
+        # Make sure the path ends with a slash
+        [[ "${service_path}" != */ ]] && service_path="${service_path}/"
+
+        # Check if service file exists in the specified path
+        if [ -f "${service_path}asda-client.service" ]; then
+            # Copy service file
+            cp "${service_path}asda-client.service" /etc/systemd/system/
+            print_status "green" "Service file installed successfully."
         else
-            read -p "Enter path to asda-client.service file: " service_path
-            if [ -f "$service_path" ]; then
-                cp "$service_path" /etc/systemd/system/
-            else
-                print_status "red" "Service file not found! Please manually copy it to /etc/systemd/system/"
-                exit 1
-            fi
+            print_status "red" "Could not find asda-client.service in ${service_path}"
+            print_status "red" "Service will not be installed properly."
+            exit 1
         fi
         systemctl daemon-reload
         systemctl enable asda-client
@@ -219,18 +242,23 @@ case $option in
         
         # Install systemd service
         print_status "blue" "Installing systemd service..."
-        if [ -f "$(dirname "$0")/asda-server.service" ]; then
-            cp "$(dirname "$0")/asda-server.service" /etc/systemd/system/
-        elif [ -f "./asda-server.service" ]; then
-            cp "./asda-server.service" /etc/systemd/system/
+
+        # Ask for the installation path with default value
+        read -p "Enter path to ASDA service files [/root/ASDA/install/]: " service_path
+        service_path=${service_path:-"/root/ASDA/install/"}
+
+        # Make sure the path ends with a slash
+        [[ "${service_path}" != */ ]] && service_path="${service_path}/"
+
+        # Check if service file exists in the specified path
+        if [ -f "${service_path}asda-server.service" ]; then
+            # Copy service file
+            cp "${service_path}asda-server.service" /etc/systemd/system/
+            print_status "green" "Service file installed successfully."
         else
-            read -p "Enter path to asda-server.service file: " service_path
-            if [ -f "$service_path" ]; then
-                cp "$service_path" /etc/systemd/system/
-            else
-                print_status "red" "Service file not found! Please manually copy it to /etc/systemd/system/"
-                exit 1
-            fi
+            print_status "red" "Could not find asda-server.service in ${service_path}"
+            print_status "red" "Service will not be installed properly."
+            exit 1
         fi
         systemctl daemon-reload
         systemctl enable asda-server
