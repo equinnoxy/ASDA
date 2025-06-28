@@ -250,7 +250,7 @@ sudo ./install/install.sh
 1. Install dependencies:
 ```bash
 # Install Node.js if not already installed
-curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # Install MySQL/MariaDB if using database
