@@ -1,22 +1,5 @@
 document.addEventListener('DOMContentLoaded', function() {
-            // Load data for the section
-            switch (sectionName) {
-                case 'dashboard':
-                    loadDashboardStats();
-                    break;
-                case 'clients':
-                    loadClients();
-                    break;
-                case 'blocked-ips':
-                    loadBlockedIPs();
-                    break;
-                case 'metrics':
-                    loadMetrics();
-                    break;
-                case 'users':
-                    loadUsers();
-                    break;
-            }ication
+    // Check authentication
     checkAuthentication();
     
     // Initialize navigation
@@ -106,9 +89,49 @@ function initNavigation() {
 async function fetchAPI(endpoint) {
     try {
         const response = await fetch(`/api/${endpoint}`);
-        if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
+        
+        if (response.status === 401) {
+            // Unauthorized - session expired or not logged in
+            console.log('Session expired, redirecting to login');
+            window.location.href = '/login';
+            return null;
         }
+        
+        if (response.status === 403) {
+            // Forbidden - don't have permission
+            console.error(`Access denied to ${endpoint} - insufficient permissions`);
+            
+            // Try to get more detailed error info
+            try {
+                const errorData = await response.json();
+                showNotification(
+                    'Access Denied', 
+                    `You do not have permission to access this resource: ${errorData.reason || 'Insufficient privileges'}`, 
+                    'danger'
+                );
+                console.error('Access denied details:', errorData);
+            } catch (e) {
+                showNotification('Access Denied', 'You do not have permission to access this resource', 'danger');
+            }
+            
+            return null;
+        }
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            let errorMessage;
+            
+            try {
+                const errorJson = JSON.parse(errorText);
+                errorMessage = errorJson.error || `API request failed: ${response.status}`;
+                console.error('API Error Details:', errorJson);
+            } catch (e) {
+                errorMessage = `API request failed: ${response.status}`;
+            }
+            
+            throw new Error(errorMessage);
+        }
+        
         return await response.json();
     } catch (error) {
         console.error(`Error fetching ${endpoint}:`, error);
@@ -384,9 +407,15 @@ async function unblockIP(ip) {
 // Authentication functions
 function checkAuthentication() {
     fetch('/api/check-auth')
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Authentication check failed: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (!data.authenticated) {
+                console.log('Not authenticated, redirecting to login');
                 window.location.href = '/login';
             } else {
                 // Update user info in UI
@@ -395,11 +424,15 @@ function checkAuthentication() {
                 // Show admin options if user is admin
                 if (data.role === 'admin') {
                     document.getElementById('user-management-link').classList.remove('d-none');
+                    console.log('Admin user detected, enabling user management');
+                } else {
+                    console.log('Regular user, hiding admin features');
                 }
             }
         })
         .catch(error => {
             console.error('Authentication check error:', error);
+            // Redirect to login on error
             window.location.href = '/login';
         });
 }

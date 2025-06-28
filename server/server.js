@@ -134,8 +134,12 @@ async function initDatabase() {
 const app = express();
 const server = http.createServer(app);
 
-// Session middleware
+// Express middleware
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 app.use(cookieParser());
+
+// Session middleware
 app.use(session({
     secret: process.env.SESSION_SECRET || 'asda-session-secret',
     resave: false,
@@ -147,9 +151,16 @@ app.use(session({
     }
 }));
 
-// Express middleware
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+// Register API routes with authentication middleware
+app.use('/api', (req, res, next) => {
+    // Skip authentication for login and auth check endpoints
+    if (req.path === '/login' || req.path === '/check-auth') {
+        return next();
+    }
+    
+    // Apply authentication middleware
+    authenticateUser(req, res, next);
+});
 
 // Authentication middleware
 const authenticateUser = async (req, res, next) => {
@@ -167,10 +178,20 @@ const authenticateUser = async (req, res, next) => {
         }
     }
     
+    // If user object is already set, use it
+    if (req.user) {
+        return next();
+    }
+    
     // Verify user exists in database
     try {
         if (!dbPool) {
-            // If no database, allow access
+            // If no database, add mock admin user
+            req.user = {
+                id: 0,
+                username: 'admin',
+                role: 'admin'
+            };
             return next();
         }
         
@@ -197,8 +218,25 @@ const authenticateUser = async (req, res, next) => {
     }
 };
 
-// Apply authentication middleware to all routes
-app.use(authenticateUser);
+// Express middleware
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+// Serve login page
+app.get('/login', (req, res) => {
+    if (req.session.userId) {
+        return res.redirect('/');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Serve main page
+app.get('/', authenticateUser, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// NO LONGER APPLYING AUTHENTICATION MIDDLEWARE GLOBALLY
+// Instead, we're applying it to specific routes as needed
 
 // WebSocket server
 const wss = new WebSocket.Server({ server: server });
@@ -553,11 +591,35 @@ app.post('/api/login', async (req, res) => {
         
         // If database is not available, use hard-coded admin credentials
         if (!dbPool) {
-            if (username === 'admin' && password === 'admin123') {
+            const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123';
+            
+            if (username === 'admin' && password === defaultPassword) {
+                // Set session values
                 req.session.userId = 0;
                 req.session.username = 'admin';
                 req.session.role = 'admin';
-                return res.json({ success: true, username: 'admin', role: 'admin' });
+                
+                // Also set the user object directly
+                req.user = {
+                    id: 0,
+                    username: 'admin',
+                    role: 'admin'
+                };
+                
+                // Save session explicitly to ensure it's stored
+                req.session.save(err => {
+                    if (err) {
+                        console.error('Error saving session:', err);
+                        return res.status(500).json({ error: 'Session error' });
+                    }
+                    
+                    return res.json({ 
+                        success: true, 
+                        username: 'admin', 
+                        role: 'admin' 
+                    });
+                });
+                return;
             } else {
                 return res.status(401).json({ error: 'Invalid credentials' });
             }
@@ -622,11 +684,19 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/check-auth', (req, res) => {
-    if (req.session.userId) {
+    if (req.session && req.session.userId !== undefined) {
+        const role = req.session.role || (!dbPool ? 'admin' : 'user'); // Default to admin in memory-only mode
+        const username = req.session.username || 'admin';
+        
+        // If in memory-only mode and userId is 0, ensure the admin role is set
+        if (!dbPool && req.session.userId === 0 && role !== 'admin') {
+            req.session.role = 'admin';
+        }
+        
         res.json({
             authenticated: true,
-            username: req.session.username,
-            role: req.session.role
+            username: username,
+            role: role
         });
     } else {
         res.json({ authenticated: false });
@@ -635,12 +705,45 @@ app.get('/api/check-auth', (req, res) => {
 
 // User management routes
 app.get('/api/users', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
     try {
+        // Direct session check without relying on user object from middleware
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ 
+                error: 'Authentication required'
+            });
+        }
+        
+        // Get user information directly from the session or database
+        let user;
+        
+        // In memory-only mode, create user from session
         if (!dbPool) {
+            user = {
+                id: req.session.userId,
+                username: req.session.username || 'admin',
+                role: req.session.role || 'admin'
+            };
+        } else {
+            // In database mode, fetch user from database
+            const [users] = await dbPool.query('SELECT * FROM users WHERE id = ?', [req.session.userId]);
+            if (users.length === 0) {
+                return res.status(401).json({ 
+                    error: 'Invalid session'
+                });
+            }
+            user = users[0];
+        }
+        
+        // Check if user is admin
+        if (user.role !== 'admin') {
+            return res.status(403).json({ 
+                error: 'Unauthorized',
+                reason: `User is not admin (role: ${user.role})`
+            });
+        }
+        
+        if (!dbPool) {
+            // Return a mock admin user when in memory-only mode
             return res.json([{ 
                 id: 0, 
                 username: 'admin', 
@@ -657,16 +760,40 @@ app.get('/api/users', async (req, res) => {
         res.json(users);
     } catch (error) {
         console.error('Error fetching users:', error);
-        res.status(500).json({ error: 'Failed to fetch users' });
+        res.status(500).json({ 
+            error: 'Failed to fetch users', 
+            message: error.message 
+        });
     }
 });
 
 app.post('/api/users', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
     try {
+        // Direct session check without relying on user object from middleware
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ 
+                error: 'Authentication required'
+            });
+        }
+        
+        // Get user role directly from the session or database
+        let userRole;
+        
+        if (!dbPool) {
+            userRole = req.session.role || 'admin';
+        } else {
+            const [users] = await dbPool.query('SELECT role FROM users WHERE id = ?', [req.session.userId]);
+            if (users.length === 0) {
+                return res.status(401).json({ error: 'Invalid session' });
+            }
+            userRole = users[0].role;
+        }
+        
+        // Check if user is admin
+        if (userRole !== 'admin') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        
         const { username, password, email, role } = req.body;
         
         if (!username || !password) {
@@ -704,11 +831,32 @@ app.post('/api/users', async (req, res) => {
 });
 
 app.put('/api/users/:id', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
     try {
+        // Direct session check without relying on user object from middleware
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ 
+                error: 'Authentication required'
+            });
+        }
+        
+        // Get user role directly from the session or database
+        let userRole;
+        
+        if (!dbPool) {
+            userRole = req.session.role || 'admin';
+        } else {
+            const [users] = await dbPool.query('SELECT role FROM users WHERE id = ?', [req.session.userId]);
+            if (users.length === 0) {
+                return res.status(401).json({ error: 'Invalid session' });
+            }
+            userRole = users[0].role;
+        }
+        
+        // Check if user is admin
+        if (userRole !== 'admin') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        
         const userId = req.params.id;
         const { username, password, email, role } = req.body;
         
@@ -766,15 +914,39 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 app.delete('/api/users/:id', async (req, res) => {
-    if (!req.user || req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
     try {
+        // Direct session check without relying on user object from middleware
+        if (!req.session || !req.session.userId) {
+            return res.status(401).json({ 
+                error: 'Authentication required'
+            });
+        }
+        
+        // Get user info directly from the session or database
+        let user;
+        
+        if (!dbPool) {
+            user = {
+                id: req.session.userId,
+                role: req.session.role || 'admin'
+            };
+        } else {
+            const [users] = await dbPool.query('SELECT id, role FROM users WHERE id = ?', [req.session.userId]);
+            if (users.length === 0) {
+                return res.status(401).json({ error: 'Invalid session' });
+            }
+            user = users[0];
+        }
+        
+        // Check if user is admin
+        if (user.role !== 'admin') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        
         const userId = req.params.id;
         
         // Prevent deleting own account
-        if (parseInt(userId) === req.user.id) {
+        if (parseInt(userId) === user.id) {
             return res.status(400).json({ error: 'Cannot delete your own account' });
         }
         
@@ -793,11 +965,6 @@ app.delete('/api/users/:id', async (req, res) => {
         console.error('Error deleting user:', error);
         res.status(500).json({ error: 'Failed to delete user' });
     }
-});
-
-// Main dashboard page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Database functions
