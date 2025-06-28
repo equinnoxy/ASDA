@@ -92,7 +92,7 @@ if ! command -v at &> /dev/null; then
     echo "[⚠️] 'at' command not found. IP will remain blocked indefinitely."
     echo "$TIMESTAMP,$IP,SCHEDULE_UNBLOCK,ERROR,at command not available" >> "$BLOCK_LOG"
 else
-    UNBAN_CMD="bash $(pwd)/unblock_from_server.sh $IP"
+    UNBAN_CMD="/bin/bash $(pwd)/unblock_from_server.sh $IP"
     if ! echo "$UNBAN_CMD" | at now + $((BAN_DURATION / 60)) minutes 2>/dev/null; then
         echo "[⚠️] Failed to schedule unblock. IP will remain blocked indefinitely."
         echo "$TIMESTAMP,$IP,SCHEDULE_UNBLOCK,ERROR,Failed to schedule with at command" >> "$BLOCK_LOG"

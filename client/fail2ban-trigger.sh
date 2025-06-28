@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # --------------------------------------------
-# Script ini dipanggil otomatis oleh Fail2Ban
-# saat sebuah IP diblokir oleh jail sshd
+# Script called automatically by Fail2Ban
+# when an IP is blocked by the sshd jail
 # --------------------------------------------
-# Argumen 1: IP address penyerang
+# Argument 1: Attacker's IP address
 # --------------------------------------------
 
 IP="$1"
@@ -12,6 +12,8 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 QUEUE_FILE=".ip_queue"
 LOG_DIR="./logs"
 ACTIONS_LOG="${LOG_DIR}/actions.log"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+BLOCK_SCRIPT="${SCRIPT_DIR}/block_from_server.sh"
 
 # Ensure log directory exists
 mkdir -p "$LOG_DIR"
@@ -33,7 +35,7 @@ function validate_ip() {
 }
 
 if [ -z "$IP" ]; then
-  echo "[❌] Tidak ada IP yang diberikan ke trigger." | tee -a "$ACTIONS_LOG"
+  echo "[❌] No IP provided to trigger." | tee -a "$ACTIONS_LOG"
   exit 1
 fi
 
@@ -49,11 +51,21 @@ if [ -f "$QUEUE_FILE" ] && grep -q "^$IP$" "$QUEUE_FILE"; then
   exit 0
 fi
 
-# Tambahkan ke file antrian
+# Add to queue file
 echo "$IP" >> "$QUEUE_FILE"
-echo "[${TIMESTAMP}] [INFO] IP $IP dimasukkan ke antrean $QUEUE_FILE" | tee -a "$ACTIONS_LOG"
+echo "[${TIMESTAMP}] [INFO] IP $IP added to queue $QUEUE_FILE" | tee -a "$ACTIONS_LOG"
 
 # Set proper permissions on queue file
 chmod 644 "$QUEUE_FILE"
+
+# Call the blocking script directly
+if [ -f "$BLOCK_SCRIPT" ]; then
+  echo "[${TIMESTAMP}] [INFO] Executing blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
+  /bin/bash "$BLOCK_SCRIPT" "$IP" "fail2ban" || {
+    echo "[${TIMESTAMP}] [ERROR] Failed to execute blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
+  }
+else
+  echo "[${TIMESTAMP}] [ERROR] Blocking script not found at $BLOCK_SCRIPT" | tee -a "$ACTIONS_LOG"
+fi
 
 exit 0
