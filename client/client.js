@@ -155,7 +155,7 @@ function blockIP(ip) {
     }
 
     // Execute blocking script with better error handling
-    exec(`bash "${path.join(__dirname, 'block_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
+    exec(`/bin/bash "${path.join(__dirname, 'block_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
         if (err) {
             log(`[❌] Failed to execute IP block: ${stderr}`, 'error');
             reportError('BLOCK_IP', ip, stderr);
@@ -186,7 +186,7 @@ function unblockIP(ip) {
     }
 
     // Execute unblocking script with better error handling
-    exec(`bash "${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
+    exec(`/bin/bash "${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
         if (err) {
             log(`[❌] Failed to execute IP unblock: ${stderr}`, 'error');
             reportError('UNBLOCK_IP', ip, stderr);
