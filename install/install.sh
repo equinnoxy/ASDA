@@ -30,14 +30,14 @@ if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
     # Install NodeJS and NPM
     if command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
-        curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
         apt-get install -y nodejs
     elif command -v dnf &> /dev/null; then
         # Fedora/RHEL 8+
         dnf module install -y nodejs:16
     elif command -v yum &> /dev/null; then
         # CentOS/RHEL 7
-        curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
         yum install -y nodejs
     else
         print_status "red" "Unsupported package manager. Please install NodeJS manually."
