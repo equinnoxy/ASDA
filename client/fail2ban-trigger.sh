@@ -9,10 +9,10 @@
 
 IP="$1"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-QUEUE_FILE=".ip_queue"
-LOG_DIR="./logs"
-ACTIONS_LOG="${LOG_DIR}/actions.log"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+QUEUE_FILE="${SCRIPT_DIR}/.ip_queue"
+LOG_DIR="${SCRIPT_DIR}/logs"
+ACTIONS_LOG="${LOG_DIR}/actions.log"
 BLOCK_SCRIPT="${SCRIPT_DIR}/block_from_server.sh"
 
 # Ensure log directory exists
