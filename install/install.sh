@@ -76,7 +76,16 @@ case $option in
         
         # Create user
         if ! id -u asda &> /dev/null; then
-            useradd -r -s /bin/false asda
+            # Create user with proper home directory and shell
+            useradd -m -d /home/asda -s /bin/bash asda
+            print_status "green" "Created asda user with home directory"
+        else
+            # Ensure home directory exists
+            if [ ! -d "/home/asda" ]; then
+                mkdir -p /home/asda
+                chown asda:asda /home/asda
+                print_status "green" "Created home directory for existing asda user"
+            fi
         fi
         
         # Copy files (using the path collected earlier)
@@ -85,6 +94,10 @@ case $option in
         # Fix permissions
         chown -R asda:asda /opt/asda/client
         chmod +x /opt/asda/client/*.sh
+        
+        # Ensure scripts are directly executable without sudo
+        print_status "blue" "Setting script permissions for direct execution..."
+        find /opt/asda/client -name "*.sh" -exec chmod 755 {} \;
         
         # Install dependencies
         cd /opt/asda/client
@@ -119,6 +132,25 @@ case $option in
                 print_status "red" "Please install Fail2Ban manually"
             fi
         fi
+        
+        # Configure sudo access for fail2ban and iptables
+        print_status "blue" "Configuring sudo access for fail2ban and iptables commands..."
+        
+        # Find the actual paths to the commands
+        FAIL2BAN_PATH=$(which fail2ban-client 2>/dev/null || echo "/usr/bin/fail2ban-client")
+        IPTABLES_PATH=$(which iptables 2>/dev/null || echo "/usr/sbin/iptables")
+        
+        echo "# Allow asda user to run fail2ban and iptables commands without a password
+asda ALL=(ALL) NOPASSWD: $FAIL2BAN_PATH, $IPTABLES_PATH" > /etc/sudoers.d/asda-security
+        chmod 440 /etc/sudoers.d/asda-security
+        
+        # Verify the sudoers syntax
+        if visudo -c -f /etc/sudoers.d/asda-security &>/dev/null; then
+            print_status "green" "Sudo access configured successfully."
+        else
+            print_status "red" "Error in sudoers configuration. Please check manually."
+            rm -f /etc/sudoers.d/asda-security
+        }
         
         # Configure Fail2Ban integration
         print_status "blue" "Configuring Fail2Ban integration..."
@@ -171,6 +203,14 @@ case $option in
         
         print_status "green" "ASDA Client installation complete!"
         print_status "blue" "Service status: $(systemctl is-active asda-client)"
+        
+        # Print testing instructions
+        print_status "yellow" "Testing Instructions:"
+        print_status "yellow" "1. Switch to the asda user: su - asda"
+        print_status "yellow" "2. Test blocking an IP: /opt/asda/client/block_from_server.sh 1.2.3.4"
+        print_status "yellow" "3. Verify the block: sudo iptables -L INPUT -n | grep 1.2.3.4"
+        print_status "yellow" "4. Test unblocking: /opt/asda/client/unblock_from_server.sh 1.2.3.4"
+        print_status "yellow" "5. Verify it was removed: sudo iptables -L INPUT -n | grep 1.2.3.4"
         ;;
         
     2)
@@ -182,7 +222,16 @@ case $option in
         
         # Create user
         if ! id -u asda &> /dev/null; then
-            useradd -r -s /bin/false asda
+            # Create user with proper home directory and shell
+            useradd -m -d /home/asda -s /bin/bash asda
+            print_status "green" "Created asda user with home directory"
+        else
+            # Ensure home directory exists
+            if [ ! -d "/home/asda" ]; then
+                mkdir -p /home/asda
+                chown asda:asda /home/asda
+                print_status "green" "Created home directory for existing asda user"
+            fi
         fi
         
         # Copy files (using the path collected earlier)
