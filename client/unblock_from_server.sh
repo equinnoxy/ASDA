@@ -7,7 +7,10 @@
 
 IP="$1"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-LOG_DIR="./logs"
+
+# Get the script's absolute directory path
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+LOG_DIR="${SCRIPT_DIR}/logs"
 ACTIONS_LOG="${LOG_DIR}/actions.log"
 BLOCK_LOG="${LOG_DIR}/block_log.csv"
 
@@ -30,24 +33,6 @@ function validate_ip() {
     return $stat
 }
 
-# Validate sudo access
-function check_sudo() {
-    if ! sudo -n true 2>/dev/null; then
-        echo "[❌] No sudo access available. Please configure passwordless sudo for fail2ban commands."
-        return 1
-    fi
-    return 0
-}
-
-# Check if fail2ban is available
-function check_fail2ban() {
-    if ! command -v fail2ban-client &> /dev/null; then
-        echo "[❌] fail2ban-client command not found. Please install fail2ban."
-        return 1
-    fi
-    return 0
-}
-
 # Validate input
 if [ -z "$IP" ]; then
   echo "[❌] IP kosong."
@@ -61,28 +46,33 @@ if ! validate_ip "$IP"; then
   exit 1
 fi
 
-# Check sudo access and fail2ban availability
-if ! check_sudo; then
-  echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,No sudo access" >> "$BLOCK_LOG"
-  exit 1
+# Try to remove the DROP rule
+UNBLOCKED=false
+
+# Check and remove from INPUT chain
+if sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
+    if sudo iptables -D INPUT -s "$IP" -j DROP; then
+        echo "[✅] Removed DROP rule for IP $IP from INPUT chain."
+        UNBLOCKED=true
+    fi
 fi
 
-if ! check_fail2ban; then
-  echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,fail2ban not available" >> "$BLOCK_LOG"
-  exit 1
+# Check and remove from INPUT chain (REJECT rule)
+if sudo iptables -C INPUT -s "$IP" -j REJECT 2>/dev/null; then
+    if sudo iptables -D INPUT -s "$IP" -j REJECT; then
+        echo "[✅] Removed REJECT rule for IP $IP from INPUT chain."
+        UNBLOCKED=true
+    fi
 fi
 
-# Unban IP
-echo "[🔓] Attempting to unblock IP $IP via Fail2Ban"
-if ! UNBLOCK_OUTPUT=$(sudo fail2ban-client set sshd unbanip "$IP" 2>&1); then
-  echo "[❌] Failed to unblock IP $IP: $UNBLOCK_OUTPUT"
-  echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,$UNBLOCK_OUTPUT" >> "$BLOCK_LOG"
-  exit 1
+if [ "$UNBLOCKED" = true ]; then
+    echo "[✅] IP $IP successfully unblocked."
+    echo "$TIMESTAMP,$IP,UNBLOCK,SUCCESS,iptables" >> "$BLOCK_LOG"
+    echo "[✅] IP $IP di-unban via iptables" >> "$ACTIONS_LOG"
+    exit 0
+else
+    echo "[⚠️] IP $IP was not found in iptables rules or could not be removed."
+    echo "$TIMESTAMP,$IP,UNBLOCK,WARNING,IP not found in iptables" >> "$BLOCK_LOG"
+    # Not a failure if IP wasn't blocked to begin with
+    exit 0
 fi
-
-# Logging CSV
-echo "$TIMESTAMP,$IP,UNBLOCK,SUCCESS," >> "$BLOCK_LOG"
-echo "[✅] IP $IP di-unban via Fail2Ban" >> "$ACTIONS_LOG"
-echo "[✅] Successfully unblocked IP $IP via Fail2Ban"
-
-exit 0
