@@ -154,11 +154,16 @@ function blockIP(ip) {
         return;
     }
 
+    const command = `"${path.join(__dirname, 'block_from_server.sh')}" "${ip}"`;
+    log(`Executing command: ${command}`);
+    
     // Execute blocking script with better error handling
-    exec(`/bin/bash "${path.join(__dirname, 'block_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
+    exec(command, { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
-            log(`[❌] Failed to execute IP block: ${stderr}`, 'error');
-            reportError('BLOCK_IP', ip, stderr);
+            log(`[❌] Failed to execute IP block: Exit code ${err.code}`, 'error');
+            log(`[❌] Command output: ${stdout}`, 'error');
+            log(`[❌] Error output: ${stderr}`, 'error');
+            reportError('BLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`);
             return;
         }
         log(`✅ Successfully blocked IP: ${ip} - ${stdout.trim()}`);
@@ -185,11 +190,16 @@ function unblockIP(ip) {
         return;
     }
 
+    const command = `"${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`;
+    log(`Executing command: ${command}`);
+    
     // Execute unblocking script with better error handling
-    exec(`/bin/bash "${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`, (err, stdout, stderr) => {
+    exec(command, { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
-            log(`[❌] Failed to execute IP unblock: ${stderr}`, 'error');
-            reportError('UNBLOCK_IP', ip, stderr);
+            log(`[❌] Failed to execute IP unblock: Exit code ${err.code}`, 'error');
+            log(`[❌] Command output: ${stdout}`, 'error');
+            log(`[❌] Error output: ${stderr}`, 'error');
+            reportError('UNBLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`);
             return;
         }
         log(`✅ Successfully unblocked IP: ${ip} - ${stdout.trim()}`);
