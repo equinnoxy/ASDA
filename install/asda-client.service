@@ -6,14 +6,16 @@ Wants=fail2ban.service
 [Service]
 Type=simple
 User=asda
+Group=asda
 WorkingDirectory=/opt/asda/client
-ExecStart=/usr/bin/node client.js
+ExecStart=/usr/bin/node /opt/asda/client/client.js
 Restart=always
 RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=asda-client
 Environment=NODE_ENV=production
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
