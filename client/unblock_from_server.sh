@@ -49,12 +49,35 @@ fi
 # Try to remove the DROP rule
 UNBLOCKED=false
 
+# Debug: Check if sudo works at all
+if ! sudo -n true 2>/dev/null; then
+    echo "[❌] Sudo access is not available without a password. Please configure sudoers."
+    echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,No sudo access" >> "$BLOCK_LOG"
+    exit 1
+fi
+
+# Debug: Check if iptables is available
+if ! command -v iptables &> /dev/null; then
+    echo "[❌] iptables command not found. Please install iptables."
+    echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,iptables command not found" >> "$BLOCK_LOG"
+    exit 1
+fi
+
+# Debug: List all rules for this IP before attempting to remove
+echo "[🔍] Current iptables rules for IP $IP:"
+sudo iptables -L INPUT -n | grep "$IP" || echo "  None found"
+
 # Check and remove from INPUT chain
 if sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
+    echo "[🔄] Executing: sudo iptables -D INPUT -s $IP -j DROP"
     if sudo iptables -D INPUT -s "$IP" -j DROP; then
         echo "[✅] Removed DROP rule for IP $IP from INPUT chain."
         UNBLOCKED=true
+    else
+        echo "[❌] Failed to remove DROP rule for IP $IP."
     fi
+else
+    echo "[ℹ️] No DROP rule found for IP $IP in INPUT chain."
 fi
 
 # Check and remove from INPUT chain (REJECT rule)

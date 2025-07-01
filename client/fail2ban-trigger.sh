@@ -63,7 +63,8 @@ if [ -f "$BLOCK_SCRIPT" ]; then
   echo "[${TIMESTAMP}] [INFO] Executing blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
   
   # Call the block script directly - ensure it uses iptables to block locally
-  "$BLOCK_SCRIPT" "$IP" "fail2ban" || {
+  # Pass 'fail2ban' as the source and 120 as the duration
+  "$BLOCK_SCRIPT" "$IP" "fail2ban" "120" || {
     echo "[${TIMESTAMP}] [ERROR] Failed to execute blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
     
     # Fallback: Try to block using iptables directly if the script fails

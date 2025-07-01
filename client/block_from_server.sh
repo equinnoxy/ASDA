@@ -6,7 +6,16 @@
 # -------------------------------------
 
 IP="$1"
-BAN_DURATION="${2:-120}" # Default 120 minutes if not specified
+SOURCE="${2:-direct}" # Source of the block (fail2ban, manual, etc.)
+BAN_DURATION="${3:-120}" # Default 120 minutes if not specified
+
+# Convert string to number for BAN_DURATION
+if ! [[ "$BAN_DURATION" =~ ^[0-9]+$ ]]; then
+    # If not a number, set to default
+    BAN_DURATION=120
+    echo "[⚠️] Invalid ban duration format. Using default of 120 minutes."
+fi
+
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 # Get the script's absolute directory path
@@ -48,19 +57,42 @@ if ! validate_ip "$IP"; then
 fi
 
 # Block IP with iptables
-echo "[🔒] Attempting to block IP $IP via iptables"
+echo "[🔒] Attempting to block IP $IP via iptables (source: $SOURCE, duration: $BAN_DURATION mins)"
+
+# Debug: Check if sudo works at all
+if ! sudo -n true 2>/dev/null; then
+    echo "[❌] Sudo access is not available without a password. Please configure sudoers."
+    echo "$TIMESTAMP,$IP,BLOCK,ERROR,No sudo access" >> "$BLOCK_LOG"
+    exit 1
+fi
+
+# Debug: Check if iptables is available
+if ! command -v iptables &> /dev/null; then
+    echo "[❌] iptables command not found. Please install iptables."
+    echo "$TIMESTAMP,$IP,BLOCK,ERROR,iptables command not found" >> "$BLOCK_LOG"
+    exit 1
+fi
 
 # First check if the IP is already blocked
 if sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
     echo "[ℹ️] IP $IP is already blocked in iptables (DROP rule)"
 else
     # Add the IP to the INPUT chain with DROP action
-    if ! sudo iptables -I INPUT -s "$IP" -j DROP 2>/dev/null; then
+    echo "[🔄] Executing: sudo iptables -I INPUT -s $IP -j DROP"
+    if ! sudo iptables -I INPUT -s "$IP" -j DROP; then
         echo "[❌] Failed to block IP $IP with iptables"
         echo "$TIMESTAMP,$IP,BLOCK,ERROR,Failed to add iptables rule" >> "$BLOCK_LOG"
         exit 1
     fi
     echo "[✅] Successfully added DROP rule for IP $IP"
+fi
+
+# Verify the rule was added
+if ! sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
+    echo "[⚠️] Rule verification failed. IP $IP may not be blocked."
+    echo "$TIMESTAMP,$IP,BLOCK,WARNING,Rule verification failed" >> "$BLOCK_LOG"
+else
+    echo "[✅] Verified DROP rule exists for IP $IP"
 fi
 
 # Logging CSV
