@@ -82,12 +82,14 @@ function connect() {
             
             if (data.type === 'BLOCK_IP' && data.ip) {
                 const ip = data.ip;
-                log(`🔒 Receiving blocking request for IP: ${ip}`);
-                blockIP(ip);
+                const requestId = data.requestId;
+                log(`🔒 Receiving blocking request for IP: ${ip} (requestId: ${requestId || 'none'})`);
+                blockIP(ip, requestId);
             } else if (data.type === 'UNBLOCK_IP' && data.ip) {
                 const ip = data.ip;
-                log(`� Receiving unblocking request for IP: ${ip}`);
-                unblockIP(ip);
+                const requestId = data.requestId;
+                log(`� Receiving unblocking request for IP: ${ip} (requestId: ${requestId || 'none'})`);
+                unblockIP(ip, requestId);
             } else {
                 log(`[⚠️] Message received but not processed: ${JSON.stringify(data)}`, 'warn');
             }
@@ -147,15 +149,18 @@ function sendHeartbeat() {
 }
 
 // Block an IP address
-function blockIP(ip) {
+function blockIP(ip, requestId) {
     if (!isValidIP(ip)) {
         log(`[❌] Invalid IP format: ${ip}`, 'error');
-        reportError('BLOCK_IP', ip, 'Invalid IP format');
+        reportError('BLOCK_IP', ip, 'Invalid IP format', requestId);
         return;
     }
 
-    const command = `"${path.join(__dirname, 'block_from_server.sh')}" "${ip}"`;
-    log(`Executing command: ${command}`);
+    // Debug logging for troubleshooting
+    log(`[🔍] Starting block operation for IP: ${ip} (requestId: ${requestId || 'none'})`);
+
+    const command = `bash "${path.join(__dirname, 'block_from_server.sh')}" "${ip}" "client-js" "120"`;
+    log(`[🔄] Executing command: ${command}`);
     
     // Execute blocking script with better error handling
     exec(command, { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
@@ -163,10 +168,19 @@ function blockIP(ip) {
             log(`[❌] Failed to execute IP block: Exit code ${err.code}`, 'error');
             log(`[❌] Command output: ${stdout}`, 'error');
             log(`[❌] Error output: ${stderr}`, 'error');
-            reportError('BLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`);
+            reportError('BLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`, requestId);
             return;
         }
-        log(`✅ Successfully blocked IP: ${ip} - ${stdout.trim()}`);
+        
+        // Log all script output for debugging
+        if (stdout) {
+            log(`[🔍] Block script stdout: ${stdout.trim()}`);
+        }
+        if (stderr) {
+            log(`[🔍] Block script stderr: ${stderr.trim()}`, stderr ? 'warn' : 'info');
+        }
+        
+        log(`[✅] Successfully blocked IP: ${ip}`);
         
         // Report success to server
         if (ws.readyState === WebSocket.OPEN) {
@@ -175,6 +189,7 @@ function blockIP(ip) {
                 client_id: clientId,
                 token: token,
                 ip: ip,
+                requestId: requestId,
                 success: true,
                 timestamp: new Date().toISOString()
             }));
@@ -183,15 +198,18 @@ function blockIP(ip) {
 }
 
 // Unblock an IP address
-function unblockIP(ip) {
+function unblockIP(ip, requestId) {
     if (!isValidIP(ip)) {
         log(`[❌] Invalid IP format: ${ip}`, 'error');
-        reportError('UNBLOCK_IP', ip, 'Invalid IP format');
+        reportError('UNBLOCK_IP', ip, 'Invalid IP format', requestId);
         return;
     }
 
-    const command = `"${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`;
-    log(`Executing command: ${command}`);
+    // Debug logging for troubleshooting
+    log(`[🔍] Starting unblock operation for IP: ${ip} (requestId: ${requestId || 'none'})`);
+
+    const command = `bash "${path.join(__dirname, 'unblock_from_server.sh')}" "${ip}"`;
+    log(`[🔄] Executing command: ${command}`);
     
     // Execute unblocking script with better error handling
     exec(command, { maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
@@ -199,10 +217,19 @@ function unblockIP(ip) {
             log(`[❌] Failed to execute IP unblock: Exit code ${err.code}`, 'error');
             log(`[❌] Command output: ${stdout}`, 'error');
             log(`[❌] Error output: ${stderr}`, 'error');
-            reportError('UNBLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`);
+            reportError('UNBLOCK_IP', ip, stderr || stdout || `Exit code ${err.code}`, requestId);
             return;
         }
-        log(`✅ Successfully unblocked IP: ${ip} - ${stdout.trim()}`);
+        
+        // Log all script output for debugging
+        if (stdout) {
+            log(`[🔍] Unblock script stdout: ${stdout.trim()}`);
+        }
+        if (stderr) {
+            log(`[🔍] Unblock script stderr: ${stderr.trim()}`, stderr ? 'warn' : 'info');
+        }
+        
+        log(`[✅] Successfully unblocked IP: ${ip}`);
         
         // Report success to server
         if (ws.readyState === WebSocket.OPEN) {
@@ -211,6 +238,7 @@ function unblockIP(ip) {
                 client_id: clientId,
                 token: token,
                 ip: ip,
+                requestId: requestId,
                 success: true,
                 timestamp: new Date().toISOString()
             }));
@@ -219,13 +247,14 @@ function unblockIP(ip) {
 }
 
 // Report errors back to the server
-function reportError(operation, ip, errorMessage) {
+function reportError(operation, ip, errorMessage, requestId) {
     if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             type: `${operation}_RESULT`,
             client_id: clientId,
             token: token,
             ip: ip,
+            requestId: requestId,
             success: false,
             error: errorMessage,
             timestamp: new Date().toISOString()
@@ -243,6 +272,15 @@ function isValidIP(ip) {
     // Simple IPv4 validation
     const ipRegex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
     return ipRegex.test(ip);
+}
+
+// Generate a unique request ID (similar to UUID v4)
+function generateRequestId() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
 }
 
 // Enhanced logging function
@@ -282,12 +320,17 @@ function pollIPQueue() {
             if (ws.readyState === WebSocket.OPEN) {
                 ipList.forEach(ip => {
                     if (isValidIP(ip.trim())) {
+                        // Generate a unique requestId for each IP being sent from the queue
+                        // This is different from server-generated requestIds but will still work
+                        const requestId = generateRequestId();
+                        
                         ws.send(JSON.stringify({
                             type: 'BLOCK_IP',
                             client_id: clientId,
                             token: token,
                             ip: ip.trim(),
                             source: 'fail2ban',
+                            requestId: requestId,
                             timestamp: new Date().toISOString()
                         }));
                         success = true;
@@ -343,5 +386,6 @@ connect();
 // Export for potential use in other modules
 module.exports = {
     blockIP,
-    unblockIP
+    unblockIP,
+    reportError
 };
