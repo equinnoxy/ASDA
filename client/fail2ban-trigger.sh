@@ -61,11 +61,41 @@ chmod 644 "$QUEUE_FILE"
 # Call the blocking script directly
 if [ -f "$BLOCK_SCRIPT" ]; then
   echo "[${TIMESTAMP}] [INFO] Executing blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
-  /bin/bash "$BLOCK_SCRIPT" "$IP" "fail2ban" || {
+  
+  # Call the block script directly - ensure it uses iptables to block locally
+  "$BLOCK_SCRIPT" "$IP" "fail2ban" || {
     echo "[${TIMESTAMP}] [ERROR] Failed to execute blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
+    
+    # Fallback: Try to block using iptables directly if the script fails
+    if command -v iptables &> /dev/null; then
+      echo "[${TIMESTAMP}] [INFO] Attempting fallback blocking via iptables directly" | tee -a "$ACTIONS_LOG"
+      if ! sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
+        if sudo iptables -I INPUT -s "$IP" -j DROP; then
+          echo "[${TIMESTAMP}] [INFO] Successfully blocked IP $IP via iptables fallback" | tee -a "$ACTIONS_LOG"
+        else
+          echo "[${TIMESTAMP}] [ERROR] Failed to block IP $IP via iptables fallback" | tee -a "$ACTIONS_LOG"
+        fi
+      else
+        echo "[${TIMESTAMP}] [INFO] IP $IP already blocked in iptables" | tee -a "$ACTIONS_LOG"
+      fi
+    fi
   }
 else
   echo "[${TIMESTAMP}] [ERROR] Blocking script not found at $BLOCK_SCRIPT" | tee -a "$ACTIONS_LOG"
+  
+  # Fallback: Try to block using iptables directly if the script is missing
+  if command -v iptables &> /dev/null; then
+    echo "[${TIMESTAMP}] [INFO] Attempting direct iptables block due to missing script" | tee -a "$ACTIONS_LOG"
+    if ! sudo iptables -C INPUT -s "$IP" -j DROP 2>/dev/null; then
+      if sudo iptables -I INPUT -s "$IP" -j DROP; then
+        echo "[${TIMESTAMP}] [INFO] Successfully blocked IP $IP via iptables" | tee -a "$ACTIONS_LOG"
+      else
+        echo "[${TIMESTAMP}] [ERROR] Failed to block IP $IP via iptables" | tee -a "$ACTIONS_LOG"
+      fi
+    else
+      echo "[${TIMESTAMP}] [INFO] IP $IP already blocked in iptables" | tee -a "$ACTIONS_LOG"
+    fi
+  fi
 fi
 
 exit 0

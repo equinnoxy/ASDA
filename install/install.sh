@@ -150,7 +150,7 @@ asda ALL=(ALL) NOPASSWD: $FAIL2BAN_PATH, $IPTABLES_PATH" > /etc/sudoers.d/asda-s
         else
             print_status "red" "Error in sudoers configuration. Please check manually."
             rm -f /etc/sudoers.d/asda-security
-        }
+        fi
         
         # Configure Fail2Ban integration
         print_status "blue" "Configuring Fail2Ban integration..."
