@@ -95,3 +95,12 @@
 #last-refresh-time {
     font-size: 0.875rem;
 }
+
+/* Chart containers */
+#response-time-chart {
+    min-height: 300px;
+}
+
+#action-type-chart, #success-rate-chart {
+    min-height: 250px;
+}

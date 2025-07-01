@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="style.css">
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <header class="navbar navbar-dark sticky-top bg-dark flex-md-nowrap p-0 shadow">
@@ -47,6 +49,11 @@
                         <li class="nav-item">
                             <a class="nav-link" href="#metrics" data-section="metrics">
                                 <i class="bi bi-graph-up"></i> Metrics
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#block-events" data-section="block-events">
+                                <i class="bi bi-clock-history"></i> Block Events
                             </a>
                         </li>
                         <li class="nav-item d-none" id="user-management-link">
@@ -243,6 +250,84 @@
                                             <tbody id="metrics-table-body">
                                                 <tr>
                                                     <td colspan="6" class="text-center">Loading metrics...</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="block-events-section" class="section d-none">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">Block Events Analytics</h1>
+                        <div class="btn-toolbar mb-2 mb-md-0">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh-block-events">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-lg-12 mb-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    Response Time Performance
+                                </div>
+                                <div class="card-body">
+                                    <canvas id="response-time-chart" height="100"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    Block Events by Action Type
+                                </div>
+                                <div class="card-body">
+                                    <canvas id="action-type-chart" height="250"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    Success Rate
+                                </div>
+                                <div class="card-body">
+                                    <canvas id="success-rate-chart" height="250"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-lg-12">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    Recent Block Events
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-striped table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Timestamp</th>
+                                                    <th>IP Address</th>
+                                                    <th>Client</th>
+                                                    <th>Action</th>
+                                                    <th>Status</th>
+                                                    <th>Response Time</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="block-events-table-body">
+                                                <tr>
+                                                    <td colspan="6" class="text-center">Loading block events...</td>
                                                 </tr>
                                             </tbody>
                                         </table>

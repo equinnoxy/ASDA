@@ -19,6 +19,38 @@ const logPath = path.join(__dirname, 'logs', 'server_log.csv');
 const receivedIpsLogPath = path.join(__dirname, 'logs', 'received_ips.log');
 const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL || '';
 
+// Request tracking for response time measurements
+const pendingBlockRequests = new Map();
+const REQUEST_TIMEOUT = 30000; // 30 seconds timeout
+
+// Function to clean up pending requests that timeout
+function cleanupPendingRequest(requestId) {
+    const request = pendingBlockRequests.get(requestId);
+    if (!request) return;
+    
+    // Record timeout events for any pending clients
+    if (request.pendingClients.size > 0) {
+        for (const [clientId, sentTime] of request.pendingClients.entries()) {
+            // Calculate response time based on how long we waited
+            const responseTime = Date.now() - sentTime;
+            
+            // Record a failed event with the timeout error
+            recordBlockEvent(
+                request.ip,
+                clientId,
+                request.action,
+                false,
+                'Response timed out',
+                responseTime  // Use the actual timeout duration instead of null
+            );
+            console.log(`⏱️ ${request.action.toUpperCase()} request to ${clientId} for IP ${request.ip} timed out after ${responseTime}ms`);
+        }
+    }
+    
+    // Remove the request from tracking
+    pendingBlockRequests.delete(requestId);
+}
+
 // Ensure logs directory exists
 const logsDir = path.join(__dirname, 'logs');
 if (!fs.existsSync(logsDir)) {
@@ -378,9 +410,7 @@ wss.on('connection', (ws, req) => {
                 
                 console.log(`🆔 Client registered: ${clientId}`);
                 return;
-            }
-
-            // Process BLOCK_IP
+            }                // Process BLOCK_IP
             if (data.type === 'BLOCK_IP') {
                 const blockStartTime = Date.now();
                 const ip = data.ip;
@@ -403,20 +433,60 @@ wss.on('connection', (ws, req) => {
                     });
                 }
                 
-                const payload = JSON.stringify(data);
+                // Add request ID to track responses from clients
+                const requestId = uuidv4();
+                
+                // Modify the payload to include the request ID
+                const originalData = {...data};
+                originalData.requestId = requestId;
+                const payload = JSON.stringify(originalData);
+                
                 let forwardedCount = 0;
+                
+                // Track which clients we've sent this request to
+                const pendingResponses = new Map();
 
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        // Store the client's ID and the time we sent the request
+                        const receivingClientId = clientMap.get(client);
+                        if (receivingClientId) {
+                            pendingResponses.set(receivingClientId, Date.now());
+                            forwardedCount++;
+                        }
                         client.send(payload);
-                        forwardedCount++;
                     }
                 });
 
+                // Store pending response tracking info
+                if (pendingResponses.size > 0) {
+                    // Store the pending responses in a global map
+                    pendingBlockRequests.set(requestId, {
+                        ip,
+                        action: 'block',
+                        pendingClients: pendingResponses,
+                        initiatingClient: clientId,
+                        timestamp: Date.now()
+                    });
+                    
+                    // Set a timeout to clean up any requests that don't get responses
+                    setTimeout(() => {
+                        cleanupPendingRequest(requestId);
+                    }, REQUEST_TIMEOUT);
+                }
+
                 const responseTime = Date.now() - blockStartTime;
                 
-                // Record response time
-                await recordBlockEvent(ip, clientId, 'block', true, null, responseTime);
+                // Don't record the block event for the initiating client yet
+                // It will be recorded when they respond with BLOCK_RESULT
+                // Instead, add the initiating client to the pending responses
+                pendingResponses.set(clientId, blockStartTime);
+                
+                // Update the pendingBlockRequests with the initiating client
+                if (pendingBlockRequests.has(requestId)) {
+                    const request = pendingBlockRequests.get(requestId);
+                    request.pendingClients.set(clientId, blockStartTime);
+                }
 
                 const logLine = `${timestamp},${clientId},${forwardedCount},${totalClients},${data.type}:${data.ip}\n`;
                 fs.appendFileSync(logPath, logLine);
@@ -446,20 +516,60 @@ wss.on('connection', (ws, req) => {
                     });
                 }
                 
-                const payload = JSON.stringify(data);
+                // Add request ID to track responses from clients
+                const requestId = uuidv4();
+                
+                // Modify the payload to include the request ID
+                const originalData = {...data};
+                originalData.requestId = requestId;
+                const payload = JSON.stringify(originalData);
+                
                 let forwardedCount = 0;
+                
+                // Track which clients we've sent this request to
+                const pendingResponses = new Map();
 
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        // Store the client's ID and the time we sent the request
+                        const receivingClientId = clientMap.get(client);
+                        if (receivingClientId) {
+                            pendingResponses.set(receivingClientId, Date.now());
+                            forwardedCount++;
+                        }
                         client.send(payload);
-                        forwardedCount++;
                     }
                 });
 
+                // Store pending response tracking info
+                if (pendingResponses.size > 0) {
+                    // Store the pending responses in a global map
+                    pendingBlockRequests.set(requestId, {
+                        ip,
+                        action: 'unblock',
+                        pendingClients: pendingResponses,
+                        initiatingClient: clientId,
+                        timestamp: Date.now()
+                    });
+                    
+                    // Set a timeout to clean up any requests that don't get responses
+                    setTimeout(() => {
+                        cleanupPendingRequest(requestId);
+                    }, REQUEST_TIMEOUT);
+                }
+
                 const responseTime = Date.now() - unblockStartTime;
                 
-                // Record response time
-                await recordBlockEvent(ip, clientId, 'unblock', true, null, responseTime);
+                // Don't record the unblock event for the initiating client yet
+                // It will be recorded when they respond with UNBLOCK_RESULT
+                // Instead, add the initiating client to the pending responses
+                pendingResponses.set(clientId, unblockStartTime);
+                
+                // Update the pendingBlockRequests with the initiating client
+                if (pendingBlockRequests.has(requestId)) {
+                    const request = pendingBlockRequests.get(requestId);
+                    request.pendingClients.set(clientId, unblockStartTime);
+                }
 
                 console.log(`📩 UNBLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients} (${responseTime}ms)`);
             }
@@ -467,14 +577,69 @@ wss.on('connection', (ws, req) => {
             // Process BLOCK_RESULT
             if (data.type === 'BLOCK_RESULT' || data.type === 'UNBLOCK_RESULT') {
                 const action = data.type === 'BLOCK_RESULT' ? 'block' : 'unblock';
-                await recordBlockEvent(
-                    data.ip, 
-                    clientId, 
-                    action,
-                    data.success, 
-                    data.error || null, 
-                    null
-                );
+                const requestId = data.requestId;
+                
+                // Check if this is a response to a tracked request
+                if (requestId && pendingBlockRequests.has(requestId)) {
+                    const request = pendingBlockRequests.get(requestId);
+                    
+                    // If this client was in the pending list
+                    if (request.pendingClients.has(clientId)) {
+                        // Calculate response time
+                        const sentTime = request.pendingClients.get(clientId);
+                        const responseTime = Date.now() - sentTime;
+                        
+                        // Record the block event with the response time
+                        await recordBlockEvent(
+                            data.ip, 
+                            clientId, 
+                            action,
+                            data.success, 
+                            data.error || null, 
+                            responseTime
+                        );
+                        
+                        // Remove this client from the pending list
+                        request.pendingClients.delete(clientId);
+                        
+                        // If all clients have responded, remove the request
+                        if (request.pendingClients.size === 0) {
+                            pendingBlockRequests.delete(requestId);
+                        }
+                        
+                        console.log(`📊 ${action.toUpperCase()} response from ${clientId} for IP ${data.ip}: ${data.success ? 'Success' : 'Failed'} (${responseTime}ms)`);
+                    } else {
+                        // This is a response from a client we weren't tracking
+                        // Instead of NULL, use current time as a baseline
+                        const responseTime = 0; // We don't know when the request was sent, so use 0 as a fallback
+                        
+                        await recordBlockEvent(
+                            data.ip, 
+                            clientId, 
+                            action,
+                            data.success, 
+                            data.error || null, 
+                            responseTime
+                        );
+                        
+                        console.log(`📊 ${action.toUpperCase()} response from ${clientId} for IP ${data.ip} (untracked client): ${data.success ? 'Success' : 'Failed'}`);
+                    }
+                } else {
+                    // This is for an untracked request (e.g., from a client action not initiated by the server)
+                    // Instead of NULL, use 0 as a fallback response time
+                    const responseTime = 0;
+                    
+                    await recordBlockEvent(
+                        data.ip, 
+                        clientId, 
+                        action,
+                        data.success, 
+                        data.error || null, 
+                        responseTime
+                    );
+                    
+                    console.log(`📊 ${action.toUpperCase()} response from ${clientId} for IP ${data.ip} (untracked request): ${data.success ? 'Success' : 'Failed'}`);
+                }
                 
                 if (!data.success && discordWebhookUrl) {
                     sendDiscordAlert({
@@ -542,6 +707,9 @@ app.post('/api/block-ip', async (req, res) => {
         // Record in database
         await recordBlockedIP(ip, 'admin', 'manual');
         
+        // Generate a request ID for tracking responses
+        const requestId = uuidv4();
+        
         // Broadcast to all clients
         const blockMessage = JSON.stringify({
             type: 'BLOCK_IP',
@@ -549,16 +717,46 @@ app.post('/api/block-ip', async (req, res) => {
             token: process.env.SECRET_TOKEN,
             ip: ip,
             source: 'manual',
+            requestId: requestId,
             timestamp: new Date().toISOString()
         });
         
+        // Track which clients we've sent this request to
+        const pendingResponses = new Map();
         let sentCount = 0;
+        
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
+                // Store the client's ID and the time we sent the request
+                const receivingClientId = clientMap.get(client);
+                if (receivingClientId) {
+                    pendingResponses.set(receivingClientId, Date.now());
+                    sentCount++;
+                }
                 client.send(blockMessage);
-                sentCount++;
             }
         });
+        
+        // Store pending response tracking info
+        if (pendingResponses.size > 0) {
+            // Store the pending responses in a global map
+            pendingBlockRequests.set(requestId, {
+                ip,
+                action: 'block',
+                pendingClients: pendingResponses,
+                initiatingClient: 'admin',
+                timestamp: Date.now()
+            });
+            
+            // Set a timeout to clean up any requests that don't get responses
+            setTimeout(() => {
+                cleanupPendingRequest(requestId);
+            }, REQUEST_TIMEOUT);
+        }
+        
+        // For manual admin actions, we don't need to record an event for the admin
+        // since they aren't a client that will perform the block operation.
+        // The actual block events will be recorded when clients respond with BLOCK_RESULT
         
         res.json({ 
             success: true, 
@@ -581,22 +779,55 @@ app.post('/api/unblock-ip', async (req, res) => {
         // Update database
         await updateBlockedIPStatus(ip, 'inactive');
         
+        // Generate a request ID for tracking responses
+        const requestId = uuidv4();
+        
         // Broadcast to all clients
         const unblockMessage = JSON.stringify({
             type: 'UNBLOCK_IP',
             client_id: 'admin',
             token: process.env.SECRET_TOKEN,
             ip: ip,
+            requestId: requestId,
             timestamp: new Date().toISOString()
         });
         
+        // Track which clients we've sent this request to
+        const pendingResponses = new Map();
         let sentCount = 0;
+        
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
+                // Store the client's ID and the time we sent the request
+                const receivingClientId = clientMap.get(client);
+                if (receivingClientId) {
+                    pendingResponses.set(receivingClientId, Date.now());
+                    sentCount++;
+                }
                 client.send(unblockMessage);
-                sentCount++;
             }
         });
+        
+        // Store pending response tracking info
+        if (pendingResponses.size > 0) {
+            // Store the pending responses in a global map
+            pendingBlockRequests.set(requestId, {
+                ip,
+                action: 'unblock',
+                pendingClients: pendingResponses,
+                initiatingClient: 'admin',
+                timestamp: Date.now()
+            });
+            
+            // Set a timeout to clean up any requests that don't get responses
+            setTimeout(() => {
+                cleanupPendingRequest(requestId);
+            }, REQUEST_TIMEOUT);
+        }
+        
+        // For manual admin actions, we don't need to record an event for the admin
+        // since they aren't a client that will perform the unblock operation.
+        // The actual unblock events will be recorded when clients respond with UNBLOCK_RESULT
         
         res.json({ 
             success: true, 
@@ -615,6 +846,16 @@ app.get('/api/metrics', async (req, res) => {
     } catch (error) {
         console.error('Error fetching metrics:', error);
         res.status(500).json({ error: 'Failed to fetch metrics' });
+    }
+});
+
+app.get('/api/block-events', async (req, res) => {
+    try {
+        const blockEvents = await getBlockEvents();
+        res.json(blockEvents);
+    } catch (error) {
+        console.error('Error fetching block events:', error);
+        res.status(500).json({ error: 'Failed to fetch block events' });
     }
 });
 
@@ -1216,6 +1457,30 @@ async function getMetrics() {
         WHERE timestamp > DATE_SUB(NOW(), INTERVAL 1 DAY)
         GROUP BY client_id
         ORDER BY total_blocks DESC
+    `);
+    
+    return rows;
+}
+
+async function getBlockEvents() {
+    if (!dbPool) return [];
+    
+    const [rows] = await dbPool.query(`
+        SELECT 
+            be.id,
+            be.ip,
+            be.client_id,
+            be.action,
+            be.timestamp,
+            be.success,
+            be.error_message,
+            be.response_time_ms,
+            c.ip as client_ip
+        FROM block_events be
+        LEFT JOIN clients c ON be.client_id = c.id
+        WHERE be.timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)
+        ORDER BY be.timestamp DESC
+        LIMIT 500
     `);
     
     return rows;

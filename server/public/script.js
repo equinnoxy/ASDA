@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('refresh-clients').addEventListener('click', loadClients);
     document.getElementById('refresh-blocked-ips').addEventListener('click', loadBlockedIPs);
     document.getElementById('refresh-metrics').addEventListener('click', loadMetrics);
+    document.getElementById('refresh-block-events').addEventListener('click', loadBlockEvents);
     
     // Set up IP blocking form
     document.getElementById('block-ip-form').addEventListener('submit', function(e) {
@@ -76,6 +77,9 @@ function initNavigation() {
                     break;
                 case 'metrics':
                     loadMetrics();
+                    break;
+                case 'block-events':
+                    loadBlockEvents();
                     break;
                 case 'users':
                     loadUsers();
@@ -302,15 +306,35 @@ async function loadMetrics() {
     metrics.forEach(metric => {
         const tr = document.createElement('tr');
         
-        // Format values
-        const lastReport = new Date(metric.latest_timestamp).toLocaleString();
+        // Format values with safer parsing to handle null, undefined, or non-numeric values
+        const lastReport = metric.latest_timestamp ? new Date(metric.latest_timestamp).toLocaleString() : 'N/A';
         const uptime = formatUptime(metric.uptime_seconds);
-        const memoryUsage = metric.avg_memory_usage_mb ? `${metric.avg_memory_usage_mb.toFixed(2)} MB` : 'N/A';
+        
+        // Parse as float first to ensure we have a number before calling toFixed()
+        let blocksPerMinute = '0.00';
+        if (metric.avg_blocks_per_minute !== null && metric.avg_blocks_per_minute !== undefined) {
+            const blockValue = parseFloat(metric.avg_blocks_per_minute);
+            if (!isNaN(blockValue)) {
+                blocksPerMinute = blockValue.toFixed(2);
+            }
+        }
+        
+        // Parse memory usage safely
+        let memoryUsage = 'N/A';
+        if (metric.avg_memory_usage_mb !== null && metric.avg_memory_usage_mb !== undefined) {
+            const memValue = parseFloat(metric.avg_memory_usage_mb);
+            if (!isNaN(memValue)) {
+                memoryUsage = `${memValue.toFixed(2)} MB`;
+            }
+        }
+        
+        // Parse total blocks safely
+        const totalBlocks = metric.total_blocks !== null && metric.total_blocks !== undefined ? metric.total_blocks : '0';
         
         tr.innerHTML = `
-            <td>${metric.client_id}</td>
-            <td>${metric.avg_blocks_per_minute ? metric.avg_blocks_per_minute.toFixed(2) : '0.00'}</td>
-            <td>${metric.total_blocks || '0'}</td>
+            <td>${metric.client_id || 'Unknown'}</td>
+            <td>${blocksPerMinute}</td>
+            <td>${totalBlocks}</td>
             <td>${uptime}</td>
             <td>${memoryUsage}</td>
             <td>${lastReport}</td>
@@ -379,6 +403,238 @@ async function loadUsers() {
     });
     
     updateLastRefreshTime();
+}
+
+async function loadBlockEvents() {
+    const blockEvents = await fetchAPI('block-events');
+    if (!blockEvents) return;
+    
+    const tableBody = document.getElementById('block-events-table-body');
+    
+    if (blockEvents.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="6" class="text-center">No block events data available</td></tr>';
+        return;
+    }
+    
+    tableBody.innerHTML = '';
+    
+    // Display the latest block events in the table
+    blockEvents.slice(0, 50).forEach(event => {
+        const tr = document.createElement('tr');
+        
+        // Format timestamp
+        const timestamp = new Date(event.timestamp).toLocaleString();
+        
+        // Status badge
+        const statusBadge = event.success 
+            ? '<span class="badge bg-success">Success</span>' 
+            : '<span class="badge bg-danger">Failed</span>';
+        
+        // Format response time
+        const responseTime = event.response_time_ms 
+            ? `${event.response_time_ms} ms` 
+            : 'N/A';
+        
+        // Format action with badge
+        const actionBadge = event.action === 'block'
+            ? '<span class="badge bg-danger">Block</span>'
+            : '<span class="badge bg-success">Unblock</span>';
+        
+        tr.innerHTML = `
+            <td>${timestamp}</td>
+            <td>${event.ip}</td>
+            <td>${event.client_id} ${event.client_ip ? `(${event.client_ip})` : ''}</td>
+            <td>${actionBadge}</td>
+            <td>${statusBadge}</td>
+            <td>${responseTime}</td>
+        `;
+        
+        tableBody.appendChild(tr);
+    });
+    
+    // Create the charts
+    createResponseTimeChart(blockEvents);
+    createActionTypeChart(blockEvents);
+    createSuccessRateChart(blockEvents);
+    
+    updateLastRefreshTime();
+}
+
+function createResponseTimeChart(blockEvents) {
+    // Filter out events with no response time
+    const eventsWithResponseTime = blockEvents.filter(event => event.response_time_ms !== null);
+    
+    // Sort by timestamp
+    const sortedEvents = [...eventsWithResponseTime].sort((a, b) => 
+        new Date(a.timestamp) - new Date(b.timestamp)
+    );
+    
+    // Limit to last 100 events for better visualization
+    const recentEvents = sortedEvents.slice(-100);
+    
+    // Prepare data for chart
+    const labels = recentEvents.map(event => new Date(event.timestamp).toLocaleString());
+    const blockData = recentEvents.map(event => event.action === 'block' ? event.response_time_ms : null);
+    const unblockData = recentEvents.map(event => event.action === 'unblock' ? event.response_time_ms : null);
+    
+    // Get context of the canvas element
+    const ctx = document.getElementById('response-time-chart').getContext('2d');
+    
+    // Destroy previous chart if it exists
+    if (window.responseTimeChart) {
+        window.responseTimeChart.destroy();
+    }
+    
+    // Create new chart
+    window.responseTimeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Block Response Time (ms)',
+                    data: blockData,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    pointRadius: 3
+                },
+                {
+                    label: 'Unblock Response Time (ms)',
+                    data: unblockData,
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    pointRadius: 3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Response Time Trend (Last 100 Events)'
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Response Time (ms)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createActionTypeChart(blockEvents) {
+    // Count block vs unblock actions
+    const blockCount = blockEvents.filter(event => event.action === 'block').length;
+    const unblockCount = blockEvents.filter(event => event.action === 'unblock').length;
+    
+    // Get context of the canvas element
+    const ctx = document.getElementById('action-type-chart').getContext('2d');
+    
+    // Destroy previous chart if it exists
+    if (window.actionTypeChart) {
+        window.actionTypeChart.destroy();
+    }
+    
+    // Create new chart
+    window.actionTypeChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Block', 'Unblock'],
+            datasets: [{
+                data: [blockCount, unblockCount],
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.8)',
+                    'rgba(54, 162, 235, 0.8)'
+                ],
+                borderColor: [
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Block vs Unblock Distribution'
+                },
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function createSuccessRateChart(blockEvents) {
+    // Count success vs failure
+    const successCount = blockEvents.filter(event => event.success).length;
+    const failureCount = blockEvents.filter(event => !event.success).length;
+    
+    // Get context of the canvas element
+    const ctx = document.getElementById('success-rate-chart').getContext('2d');
+    
+    // Destroy previous chart if it exists
+    if (window.successRateChart) {
+        window.successRateChart.destroy();
+    }
+    
+    // Create new chart
+    window.successRateChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: ['Success', 'Failure'],
+            datasets: [{
+                data: [successCount, failureCount],
+                backgroundColor: [
+                    'rgba(75, 192, 192, 0.8)',
+                    'rgba(255, 99, 132, 0.8)'
+                ],
+                borderColor: [
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 99, 132, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Operation Success Rate'
+                },
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
 }
 
 // Action functions
@@ -582,7 +838,11 @@ function isValidIP(ip) {
 }
 
 function formatUptime(seconds) {
-    if (!seconds) return 'N/A';
+    // Handle null, undefined, NaN or zero values
+    if (!seconds || isNaN(parseFloat(seconds))) return 'N/A';
+    
+    // Ensure seconds is a number
+    seconds = parseFloat(seconds);
     
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
