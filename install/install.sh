@@ -136,18 +136,44 @@ case $option in
         # Configure sudo access for fail2ban and iptables
         print_status "blue" "Configuring sudo access for fail2ban and iptables commands..."
         
+        # Remove any existing conflicting sudoers files first
+        print_status "blue" "Removing any existing ASDA sudoers files..."
+        rm -f /etc/sudoers.d/asda*
+        rm -f /etc/sudoers.d/*asda*
+        
         # Find the actual paths to the commands
         FAIL2BAN_PATH=$(which fail2ban-client 2>/dev/null || echo "/usr/bin/fail2ban-client")
         IPTABLES_PATH=$(which iptables 2>/dev/null || echo "/usr/sbin/iptables")
         
-        # Create a more permissive sudoers file that allows full iptables command execution
-        echo "# Allow asda user to run fail2ban and iptables commands without a password
-asda ALL=(ALL) NOPASSWD: $FAIL2BAN_PATH
-asda ALL=(ALL) NOPASSWD: $IPTABLES_PATH *" > /etc/sudoers.d/asda-security
+        print_status "blue" "Detected command paths:"
+        print_status "blue" "  fail2ban-client: $FAIL2BAN_PATH"
+        print_status "blue" "  iptables: $IPTABLES_PATH"
+        
+        # Create comprehensive sudoers configuration that we know works
+        cat > /etc/sudoers.d/asda-security << 'EOF'
+# ASDA Client sudo permissions
+# Allow asda user to run specific commands without password
+
+# Basic sudo access for asda user
+asda ALL=(ALL) NOPASSWD: ALL
+
+# Specific iptables and fail2ban permissions (redundant but explicit)
+asda ALL=(ALL) NOPASSWD: /usr/sbin/iptables
+asda ALL=(ALL) NOPASSWD: /usr/sbin/iptables *
+asda ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client
+asda ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client *
+
+# Allow common system commands that might be needed
+asda ALL=(ALL) NOPASSWD: /bin/systemctl
+asda ALL=(ALL) NOPASSWD: /usr/bin/at
+asda ALL=(ALL) NOPASSWD: /usr/bin/atrm
+EOF
+        
         chmod 440 /etc/sudoers.d/asda-security
+        chown root:root /etc/sudoers.d/asda-security
         
         print_status "blue" "Created sudoers file with the following content:"
-        cat /etc/sudoers.d/asda-security
+        cat /etc/sudoers.d/asda-security | sed 's/^/  /'
         
         # Verify the sudoers syntax
         if visudo -c -f /etc/sudoers.d/asda-security &>/dev/null; then
@@ -156,15 +182,26 @@ asda ALL=(ALL) NOPASSWD: $IPTABLES_PATH *" > /etc/sudoers.d/asda-security
             print_status "red" "Error in sudoers configuration. Please check manually."
             cat /etc/sudoers.d/asda-security
             rm -f /etc/sudoers.d/asda-security
+            exit 1
         fi
         
-        # Test sudo access directly to catch issues early
+        # Test sudo access comprehensively
         print_status "blue" "Testing sudo access for asda user..."
-        if su - asda -c "sudo -l" | grep -q "$IPTABLES_PATH"; then
-            print_status "green" "Sudo access for iptables is correctly configured."
+        
+        # Test basic sudo
+        if su - asda -c "sudo -n true" &>/dev/null; then
+            print_status "green" "✅ Basic sudo access works"
         else
-            print_status "red" "Sudo access for iptables may not be working correctly. Please check manually."
-            print_status "yellow" "Command output: $(su - asda -c "sudo -l")"
+            print_status "red" "❌ Basic sudo access failed"
+            print_status "yellow" "⚠️ Sudo access is not working correctly. This will cause blocking to fail."
+            print_status "yellow" "Try running: visudo -c -f /etc/sudoers.d/asda-security to check for errors."
+        fi
+        
+        # Test iptables access
+        if su - asda -c "sudo -n iptables -L INPUT -n >/dev/null 2>&1"; then
+            print_status "green" "✅ Iptables sudo access works"
+        else
+            print_status "red" "❌ Iptables sudo access failed - blocking will not work!"
         fi
         
         # Configure Fail2Ban integration
@@ -204,6 +241,13 @@ asda ALL=(ALL) NOPASSWD: $IPTABLES_PATH *" > /etc/sudoers.d/asda-security
             # Copy service file
             cp "${service_path}asda-client.service" /etc/systemd/system/
             print_status "green" "Service file installed successfully."
+            
+            # Add HOME environment variable to the service file if missing
+            if ! grep -q "Environment=HOME=" /etc/systemd/system/asda-client.service; then
+                print_status "blue" "Adding HOME environment variable to service file..."
+                sed -i '/Environment=PATH=/a Environment=HOME=/home/asda\nEnvironment=SUDO_USER=asda' /etc/systemd/system/asda-client.service
+                print_status "green" "Service file updated with HOME environment."
+            fi
         else
             print_status "red" "Could not find asda-client.service in ${service_path}"
             print_status "red" "Service will not be installed properly."

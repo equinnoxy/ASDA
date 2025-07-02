@@ -16,6 +16,9 @@ StandardError=journal
 SyslogIdentifier=asda-client
 Environment=NODE_ENV=production
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/home/asda
+# Ensure sudo preserves environment for the asda user
+Environment=SUDO_USER=asda
 
 [Install]
 WantedBy=multi-user.target
