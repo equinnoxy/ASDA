@@ -62,8 +62,19 @@ chmod 644 "$QUEUE_FILE"
 if [ -f "$BLOCK_SCRIPT" ]; then
   echo "[${TIMESTAMP}] [INFO] Executing blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
   
+  # Debug: Check sudo capabilities before running block script
+  echo "[${TIMESTAMP}] [DEBUG] Testing sudo access for iptables" | tee -a "$ACTIONS_LOG"
+  if ! sudo -n iptables -L INPUT -n > /dev/null 2>&1; then
+    echo "[${TIMESTAMP}] [ERROR] No passwordless sudo access for iptables commands" | tee -a "$ACTIONS_LOG"
+    echo "[${TIMESTAMP}] [DEBUG] Current sudo permissions:" | tee -a "$ACTIONS_LOG"
+    sudo -l 2>&1 | tee -a "$ACTIONS_LOG"
+  else
+    echo "[${TIMESTAMP}] [DEBUG] Sudo access for iptables confirmed" | tee -a "$ACTIONS_LOG"
+  fi
+  
   # Call the block script directly - ensure it uses iptables to block locally
   # Pass 'fail2ban' as the source and 120 as the duration
+  echo "[${TIMESTAMP}] [DEBUG] Running: $BLOCK_SCRIPT $IP fail2ban 120" | tee -a "$ACTIONS_LOG"
   "$BLOCK_SCRIPT" "$IP" "fail2ban" "120" || {
     echo "[${TIMESTAMP}] [ERROR] Failed to execute blocking script for IP $IP" | tee -a "$ACTIONS_LOG"
     

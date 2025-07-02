@@ -140,16 +140,31 @@ case $option in
         FAIL2BAN_PATH=$(which fail2ban-client 2>/dev/null || echo "/usr/bin/fail2ban-client")
         IPTABLES_PATH=$(which iptables 2>/dev/null || echo "/usr/sbin/iptables")
         
+        # Create a more permissive sudoers file that allows full iptables command execution
         echo "# Allow asda user to run fail2ban and iptables commands without a password
-asda ALL=(ALL) NOPASSWD: $FAIL2BAN_PATH, $IPTABLES_PATH" > /etc/sudoers.d/asda-security
+asda ALL=(ALL) NOPASSWD: $FAIL2BAN_PATH
+asda ALL=(ALL) NOPASSWD: $IPTABLES_PATH *" > /etc/sudoers.d/asda-security
         chmod 440 /etc/sudoers.d/asda-security
+        
+        print_status "blue" "Created sudoers file with the following content:"
+        cat /etc/sudoers.d/asda-security
         
         # Verify the sudoers syntax
         if visudo -c -f /etc/sudoers.d/asda-security &>/dev/null; then
             print_status "green" "Sudo access configured successfully."
         else
             print_status "red" "Error in sudoers configuration. Please check manually."
+            cat /etc/sudoers.d/asda-security
             rm -f /etc/sudoers.d/asda-security
+        fi
+        
+        # Test sudo access directly to catch issues early
+        print_status "blue" "Testing sudo access for asda user..."
+        if su - asda -c "sudo -l" | grep -q "$IPTABLES_PATH"; then
+            print_status "green" "Sudo access for iptables is correctly configured."
+        else
+            print_status "red" "Sudo access for iptables may not be working correctly. Please check manually."
+            print_status "yellow" "Command output: $(su - asda -c "sudo -l")"
         fi
         
         # Configure Fail2Ban integration

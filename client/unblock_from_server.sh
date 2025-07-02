@@ -63,6 +63,15 @@ if ! command -v iptables &> /dev/null; then
     exit 1
 fi
 
+# Debug: Check if we can use iptables with sudo without a password
+if ! sudo -n iptables -L INPUT -n > /dev/null 2>&1; then
+    echo "[❌] Cannot run iptables commands with sudo. Check sudoers configuration."
+    echo "[ℹ️] Current sudo permissions:"
+    sudo -l 2>&1 | tee -a "$ACTIONS_LOG"
+    echo "$TIMESTAMP,$IP,UNBLOCK,ERROR,No sudo access for iptables commands" >> "$BLOCK_LOG"
+    exit 1
+fi
+
 # Debug: List all rules for this IP before attempting to remove
 echo "[🔍] Current iptables rules for IP $IP:"
 sudo iptables -L INPUT -n | grep "$IP" || echo "  None found"
