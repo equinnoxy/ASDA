@@ -8,3 +8,6 @@ logs/
 
 # Credentials
 .env
+
+# Clipboard files
+clipboard.txt
