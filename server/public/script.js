@@ -306,11 +306,13 @@ async function loadMetrics() {
     metrics.forEach(metric => {
         const tr = document.createElement('tr');
         
-        // Format values with safer parsing to handle null, undefined, or non-numeric values
+        // Format timestamp for "Last Report" column
         const lastReport = metric.latest_timestamp ? new Date(metric.latest_timestamp).toLocaleString() : 'N/A';
+        
+        // Format uptime
         const uptime = formatUptime(metric.uptime_seconds);
         
-        // Parse as float first to ensure we have a number before calling toFixed()
+        // Parse blocks per minute value
         let blocksPerMinute = '0.00';
         if (metric.avg_blocks_per_minute !== null && metric.avg_blocks_per_minute !== undefined) {
             const blockValue = parseFloat(metric.avg_blocks_per_minute);
@@ -319,17 +321,19 @@ async function loadMetrics() {
             }
         }
         
-        // Parse memory usage safely
+        // Parse memory usage
         let memoryUsage = 'N/A';
-        if (metric.avg_memory_usage_mb !== null && metric.avg_memory_usage_mb !== undefined) {
-            const memValue = parseFloat(metric.avg_memory_usage_mb);
+        if (metric.memory_usage_mb !== null && metric.memory_usage_mb !== undefined) {
+            const memValue = parseFloat(metric.memory_usage_mb);
             if (!isNaN(memValue)) {
                 memoryUsage = `${memValue.toFixed(2)} MB`;
             }
         }
         
-        // Parse total blocks safely
-        const totalBlocks = metric.total_blocks !== null && metric.total_blocks !== undefined ? metric.total_blocks : '0';
+        // Parse total blocks
+        const totalBlocks = metric.total_blocks !== null && metric.total_blocks !== undefined 
+            ? metric.total_blocks.toLocaleString() 
+            : '0';
         
         tr.innerHTML = `
             <td>${metric.client_id || 'Unknown'}</td>

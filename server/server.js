@@ -109,11 +109,12 @@ async function initDatabase() {
         
         await dbPool.query(`
             CREATE TABLE IF NOT EXISTS metrics (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                client_id VARCHAR(255),
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                blocks_last_minute INT,
-                blocks_last_hour INT,
+                client_id VARCHAR(255) PRIMARY KEY,
+                first_reported TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_reported TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                blocks_last_minute INT DEFAULT 0,
+                blocks_per_minute FLOAT DEFAULT 0,
+                total_blocks INT DEFAULT 0,
                 uptime_seconds FLOAT,
                 memory_usage_mb FLOAT
             )
@@ -477,20 +478,23 @@ wss.on('connection', (ws, req) => {
 
                 const responseTime = Date.now() - blockStartTime;
                 
-                // Don't record the block event for the initiating client yet
-                // It will be recorded when they respond with BLOCK_RESULT
-                // Instead, add the initiating client to the pending responses
-                pendingResponses.set(clientId, blockStartTime);
+                // Immediately record a success for the initiating client
+                // Since it's already blocking the IP locally (via fail2ban-trigger.sh or directly)
+                await recordBlockEvent(
+                    ip,
+                    clientId,
+                    'block',
+                    true, // Assume success
+                    null,
+                    responseTime
+                );
                 
-                // Update the pendingBlockRequests with the initiating client
-                if (pendingBlockRequests.has(requestId)) {
-                    const request = pendingBlockRequests.get(requestId);
-                    request.pendingClients.set(clientId, blockStartTime);
-                }
+                // Don't add the initiating client to pending responses
+                // This prevents the timeout since we won't expect a response from the client that sent the request
 
                 const logLine = `${timestamp},${clientId},${forwardedCount},${totalClients},${data.type}:${data.ip}\n`;
                 fs.appendFileSync(logPath, logLine);
-                console.log(`📩 BLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients} (${responseTime}ms)`);
+                console.log(`📩 BLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients-1} other clients (${responseTime}ms)`);
             }
             
             // Process UNBLOCK_IP
@@ -560,18 +564,21 @@ wss.on('connection', (ws, req) => {
 
                 const responseTime = Date.now() - unblockStartTime;
                 
-                // Don't record the unblock event for the initiating client yet
-                // It will be recorded when they respond with UNBLOCK_RESULT
-                // Instead, add the initiating client to the pending responses
-                pendingResponses.set(clientId, unblockStartTime);
+                // Immediately record a success for the initiating client
+                // Since it's already unblocking the IP locally
+                await recordBlockEvent(
+                    ip,
+                    clientId,
+                    'unblock',
+                    true, // Assume success
+                    null,
+                    responseTime
+                );
                 
-                // Update the pendingBlockRequests with the initiating client
-                if (pendingBlockRequests.has(requestId)) {
-                    const request = pendingBlockRequests.get(requestId);
-                    request.pendingClients.set(clientId, unblockStartTime);
-                }
+                // Don't add the initiating client to pending responses
+                // This prevents the timeout since we won't expect a response from the client that sent the request
 
-                console.log(`📩 UNBLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients} (${responseTime}ms)`);
+                console.log(`📩 UNBLOCK_IP from ${clientId} forwarded to ${forwardedCount}/${totalClients-1} other clients (${responseTime}ms)`);
             }
             
             // Process BLOCK_RESULT
@@ -1290,6 +1297,34 @@ app.delete('/api/users/:id', async (req, res) => {
     }
 });
 
+// API Routes
+
+// Get total blocks for a specific client
+app.get('/api/client/:clientId/totalBlocks', async (req, res) => {
+    try {
+        const clientId = req.params.clientId;
+        
+        if (!dbPool) {
+            return res.status(500).json({ error: 'Database not available' });
+        }
+        
+        // Get current total blocks for this client
+        const [result] = await dbPool.query(
+            `SELECT total_blocks FROM metrics WHERE client_id = ?`,
+            [clientId]
+        );
+        
+        if (result.length > 0) {
+            res.json({ total_blocks: result[0].total_blocks });
+        } else {
+            res.json({ total_blocks: 0 });
+        }
+    } catch (error) {
+        console.error('Error getting total blocks:', error);
+        res.status(500).json({ error: 'Failed to get total blocks' });
+    }
+});
+
 // Database functions
 async function registerClient(clientId, clientIp, version = 'unknown') {
     if (!dbPool) return;
@@ -1389,18 +1424,77 @@ async function storeMetrics(clientId, metrics) {
         const memoryUsageMB = metrics.memoryUsage && metrics.memoryUsage.heapUsed 
             ? Math.round(metrics.memoryUsage.heapUsed / 1024 / 1024 * 100) / 100
             : null;
+
+        // Get current total blocks for this client
+        const [currentMetrics] = await dbPool.query(`
+            SELECT client_id, total_blocks, blocks_per_minute FROM metrics WHERE client_id = ?
+        `, [clientId]);
+        
+        // Get the client's reported total blocks or default to 0
+        let clientReportedTotal = metrics.totalLocalBlocks || 0;
+        let blocksPerMinute = metrics.lastMinuteBlockCount || 0;
+        let finalTotalBlocks = clientReportedTotal;
+        
+        // If client exists in the metrics table, determine the correct total
+        if (currentMetrics.length > 0) {
+            const dbStoredTotal = currentMetrics[0].total_blocks || 0;
             
-        await dbPool.query(`
-            INSERT INTO metrics 
-            (client_id, blocks_last_minute, blocks_last_hour, uptime_seconds, memory_usage_mb) 
-            VALUES (?, ?, ?, ?, ?)
-        `, [
-            clientId, 
-            metrics.lastMinuteBlockCount || 0,
-            metrics.lastHourBlockCount || 0,
-            metrics.uptime || 0,
-            memoryUsageMB
-        ]);
+            // Always use the higher value between what's in the database and what the client reports
+            // This ensures we don't lose counts if the client restarts
+            finalTotalBlocks = Math.max(clientReportedTotal, dbStoredTotal);
+            
+            // If the client just connected (totalLocalBlocks is 0), use the stored total
+            if (clientReportedTotal === 0 && dbStoredTotal > 0) {
+                finalTotalBlocks = dbStoredTotal;
+            }
+            
+            // Calculate new average blocks per minute (rolling average)
+            // 80% of previous average + 20% of new value
+            blocksPerMinute = (currentMetrics[0].blocks_per_minute * 0.8) + 
+                              (metrics.lastMinuteBlockCount * 0.2);
+        }
+            
+        // Check if the client exists in metrics table
+        const [clientExists] = await dbPool.query(`
+            SELECT COUNT(*) as count FROM metrics WHERE client_id = ?
+        `, [clientId]);
+        
+        if (clientExists[0].count > 0) {
+            // Client exists, perform UPDATE only
+            await dbPool.query(`
+                UPDATE metrics SET 
+                    blocks_last_minute = ?,
+                    blocks_per_minute = ?,
+                    total_blocks = ?,
+                    uptime_seconds = ?,
+                    memory_usage_mb = ?,
+                    last_reported = NOW()
+                WHERE client_id = ?
+            `, [
+                metrics.lastMinuteBlockCount || 0,
+                blocksPerMinute,
+                finalTotalBlocks,
+                metrics.uptime || 0,
+                memoryUsageMB,
+                clientId
+            ]);
+        } else {
+            // Client doesn't exist, perform INSERT
+            await dbPool.query(`
+                INSERT INTO metrics 
+                (client_id, blocks_last_minute, blocks_per_minute, total_blocks, uptime_seconds, memory_usage_mb, last_reported) 
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
+            `, [
+                clientId, 
+                metrics.lastMinuteBlockCount || 0,
+                blocksPerMinute,
+                finalTotalBlocks,
+                metrics.uptime || 0,
+                memoryUsageMB
+            ]);
+        }
+        
+        console.log(`📊 Metrics updated for client ${clientId}: ${metrics.lastMinuteBlockCount} blocks in last minute, ${finalTotalBlocks} total blocks`);
     } catch (error) {
         console.error(`Error storing metrics for client ${clientId}:`, error);
     }
@@ -1443,23 +1537,49 @@ async function getBlockedIPs() {
 }
 
 async function getMetrics() {
-    if (!dbPool) return [];
+    if (!dbPool) {
+        // Return some mock data if no database
+        return Array.from(clientDetails.entries()).map(([id, details]) => ({
+            client_id: id,
+            blocks_per_minute: 0,
+            total_blocks: 0,
+            uptime_seconds: 0,
+            memory_usage_mb: 0,
+            last_reported: new Date().toISOString()
+        }));
+    }
     
     const [rows] = await dbPool.query(`
         SELECT 
-            client_id,
-            MAX(timestamp) as latest_timestamp,
-            AVG(blocks_last_minute) as avg_blocks_per_minute,
-            SUM(blocks_last_minute) as total_blocks,
-            MAX(uptime_seconds) as uptime_seconds,
-            AVG(memory_usage_mb) as avg_memory_usage_mb
-        FROM metrics
-        WHERE timestamp > DATE_SUB(NOW(), INTERVAL 1 DAY)
-        GROUP BY client_id
-        ORDER BY total_blocks DESC
+            m.client_id,
+            m.blocks_per_minute,
+            m.blocks_last_minute,
+            m.total_blocks,
+            m.uptime_seconds,
+            m.memory_usage_mb,
+            m.last_reported,
+            c.status AS client_status
+        FROM 
+            metrics m
+        LEFT JOIN 
+            clients c ON m.client_id = c.id
+        ORDER BY 
+            m.total_blocks DESC
     `);
     
-    return rows;
+    // Format the rows to match what the frontend expects
+    const formattedRows = rows.map(row => ({
+        client_id: row.client_id,
+        avg_blocks_per_minute: row.blocks_per_minute,
+        blocks_last_minute: row.blocks_last_minute,
+        total_blocks: row.total_blocks,
+        uptime_seconds: row.uptime_seconds,
+        memory_usage_mb: row.memory_usage_mb,
+        latest_timestamp: row.last_reported,
+        client_status: row.client_status
+    }));
+    
+    return formattedRows;
 }
 
 async function getBlockEvents() {
