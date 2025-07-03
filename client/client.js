@@ -182,6 +182,11 @@ function blockIP(ip, requestId) {
         
         log(`[✅] Successfully blocked IP: ${ip}`);
         
+        // Increment block counters for metrics
+        lastMinuteBlockCount++;
+        lastHourBlockCount++;
+        totalLocalBlocks++; // Increment the total count for each successful block
+        
         // Report success to server
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
@@ -358,10 +363,54 @@ setInterval(pollIPQueue, 3000);
 // Start metrics collection
 let lastMinuteBlockCount = 0;
 let lastHourBlockCount = 0;
+let totalLocalBlocks = 0; // Track total blocks locally
+
+// Initialize metrics from persistent storage or default to 0 (could be enhanced with file-based persistence)
+async function initializeMetrics() {
+    try {
+        log('[📊] Initializing metrics tracking');
+        
+        // If we have a server connection, try to fetch the latest total blocks
+        if (serverIp && serverPort) {
+            try {
+                // Use http request to fetch the current total blocks from server
+                const { execSync } = require('child_process');
+                const curlCmd = `curl -s http://${serverIp}:${serverPort}/api/client/${clientId}/totalBlocks`;
+                
+                // Execute curl command and parse result
+                const result = execSync(curlCmd, { encoding: 'utf8' });
+                const jsonResult = JSON.parse(result);
+                
+                if (jsonResult && jsonResult.total_blocks !== undefined) {
+                    totalLocalBlocks = jsonResult.total_blocks;
+                    log(`[📊] Retrieved total blocks from server: ${totalLocalBlocks}`);
+                }
+            } catch (fetchError) {
+                log(`[⚠️] Could not fetch total blocks from server: ${fetchError.message}`, 'warn');
+                log('[📊] Using default total block count: 0');
+            }
+        }
+    } catch (error) {
+        log('[⚠️] Error initializing metrics: ' + error.message, 'warn');
+    }
+}
+
+// Save metrics to a persistent storage (could be enhanced with file-based persistence)
+function saveMetricsState() {
+    try {
+        // For now, we just log - this could be enhanced to write to a file
+        log(`[📊] Current metrics state: ${totalLocalBlocks} total blocks`);
+    } catch (error) {
+        log('[⚠️] Error saving metrics state: ' + error.message, 'warn');
+    }
+}
 
 // Collect metrics every minute
 setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
+        // Do NOT add lastMinuteBlockCount to totalLocalBlocks here - that happens in the blockIP function
+        // This ensures we don't double-count blocks
+        
         ws.send(JSON.stringify({
             type: 'METRICS',
             client_id: clientId,
@@ -369,19 +418,35 @@ setInterval(() => {
             metrics: {
                 lastMinuteBlockCount,
                 lastHourBlockCount,
+                totalLocalBlocks,
                 uptime: process.uptime(),
                 memoryUsage: process.memoryUsage(),
                 timestamp: new Date().toISOString()
             }
         }));
+        
+        log(`[📊] Sending metrics: ${lastMinuteBlockCount} blocks in last minute, ${totalLocalBlocks} total`);
+        
+        // Save metrics state to maintain counts across restarts (implementation dependent)
+        saveMetricsState();
     }
     
-    // Reset minute counter
+    // Reset minute counter but keep hourly and total
     lastMinuteBlockCount = 0;
 }, 60000);
 
-// Establish initial connection
-connect();
+// Reset hourly counter every hour
+setInterval(() => {
+    lastHourBlockCount = 0;
+}, 3600000);
+
+// Initialize metrics tracking
+(async function() {
+    await initializeMetrics();
+    
+    // Establish initial connection
+    connect();
+})();
 
 // Export for potential use in other modules
 module.exports = {
